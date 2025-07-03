@@ -102,6 +102,7 @@ RistrettoDB is engineered for maximum performance through several key optimizati
 4. **Storage** → Direct memory-mapped file access
 
 ### Data Storage Layouts
+![ristrettoDB Logo](ristretto_db.png)
 
 RistrettoDB supports two storage formats optimized for different use cases:
 
