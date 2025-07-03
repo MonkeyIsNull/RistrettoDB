@@ -184,6 +184,17 @@ make format
 
 The binary will be created in the `bin/` directory.
 
+## 📖 Programming Manual
+
+**For comprehensive examples and detailed API documentation, see the [Programming Manual](doc/PROGRAMMING_MANUAL.md)**
+
+The manual includes:
+- Complete build instructions and setup
+- Extensive examples for both Original and Table V2 APIs
+- Real-world use cases (IoT telemetry, security logging, analytics)
+- Performance optimization techniques
+- Best practices and troubleshooting
+
 ## Usage Examples
 
 ### Command Line Interface
@@ -425,14 +436,6 @@ RistrettoDB provides two complementary implementations:
 - 2.8x faster than SQLite overall
 - Full SQL parser integration
 - Best for: General embedded SQL needs
-
-### Contributing
-
-1. Focus on performance over features
-2. Maintain the minimal SQL subset
-3. Ensure zero-copy principles
-4. Add comprehensive tests
-5. Document performance implications
 
 ## License
 
