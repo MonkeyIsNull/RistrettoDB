@@ -156,12 +156,6 @@ RowId* btree_find(BTree* btree, uint32_t key) {
     return NULL;
 }
 
-bool btree_delete(BTree* btree, uint32_t key) {
-    // TODO: Implement deletion
-    (void)btree;
-    (void)key;
-    return false;
-}
 
 BTreeCursor* btree_cursor_create(BTree* btree) {
     BTreeCursor* cursor = malloc(sizeof(BTreeCursor));

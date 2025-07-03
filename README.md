@@ -1,6 +1,7 @@
 # RistrettoDB
+![ristretto Logo](ristretto_logo.png)
 
-A tiny, blazingly fast, embeddable SQL engine written in C, designed to outperform SQLite in narrowly optimized scenarios.
+A tiny, blazingly fast, embeddable append-only SQL engine written in C, designed to outperform SQLite in narrowly optimized scenarios.
 
 ## What is RistrettoDB?
 
@@ -13,14 +14,14 @@ Unlike general-purpose databases, RistrettoDB trades broad feature support for r
 - Fixed-width row layouts
 - Direct memory access patterns
 
+![speed_train Logo](speed_train.png)
+
 ## Features
 
 ### Core SQL Support
 - **CREATE TABLE** - Define tables with typed columns
 - **INSERT** - Add data with automatic type checking and conversion
 - **SELECT** - Query data with table scanning
-- **UPDATE** - Modify existing records (planned)
-- **DELETE** - Remove records (planned)
 
 ### Supported Data Types
 - `INTEGER` - 64-bit signed integers
@@ -236,6 +237,9 @@ time echo "SELECT * FROM benchmark;" | bin/ristretto bench.db > /dev/null
 ### When to Use RistrettoDB
 
 **Good for:**
+- Append-only data logging and analytics
+- Time-series data collection
+- Event sourcing systems
 - Embedded applications with predictable data patterns
 - Read-heavy workloads with simple queries
 - Applications requiring minimal memory footprint
@@ -243,6 +247,7 @@ time echo "SELECT * FROM benchmark;" | bin/ristretto bench.db > /dev/null
 - Performance-critical data processing
 
 **Not suitable for:**
+- Applications requiring UPDATE or DELETE operations
 - Complex SQL queries (JOINs, subqueries)
 - Concurrent write-heavy workloads
 - Applications requiring ACID transactions
@@ -251,6 +256,7 @@ time echo "SELECT * FROM benchmark;" | bin/ristretto bench.db > /dev/null
 
 ## Current Limitations
 
+- No UPDATE or DELETE operations (insert-only database)
 - No JOINs or subqueries
 - No transactions or concurrency control
 - Single-threaded operation only

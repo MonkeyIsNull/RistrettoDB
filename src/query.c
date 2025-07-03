@@ -111,14 +111,6 @@ void plan_destroy(QueryPlan* plan) {
             // Values are owned by the statement, not the plan
             break;
             
-        case PLAN_UPDATE:
-            free(plan->data.update.columns);
-            // Values and filter are owned by the statement, not the plan
-            break;
-            
-        case PLAN_DELETE:
-            // Filter is owned by the statement, not the plan
-            break;
             
         case PLAN_CREATE_TABLE:
             // CreateTableStmt is owned by the statement, not the plan

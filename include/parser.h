@@ -7,9 +7,7 @@
 typedef enum {
     STMT_CREATE_TABLE,
     STMT_INSERT,
-    STMT_SELECT,
-    STMT_UPDATE,
-    STMT_DELETE
+    STMT_SELECT
 } StatementType;
 
 typedef enum {
@@ -67,20 +65,6 @@ typedef struct {
     Expr *where_clause;
 } SelectStmt;
 
-typedef struct {
-    char *table_name;
-    uint32_t update_count;
-    struct {
-        char *column;
-        Value value;
-    } *updates;
-    Expr *where_clause;
-} UpdateStmt;
-
-typedef struct {
-    char *table_name;
-    Expr *where_clause;
-} DeleteStmt;
 
 typedef struct {
     StatementType type;
@@ -88,8 +72,6 @@ typedef struct {
         CreateTableStmt create_table;
         InsertStmt insert;
         SelectStmt select;
-        UpdateStmt update;
-        DeleteStmt delete;
     } data;
 } Statement;
 

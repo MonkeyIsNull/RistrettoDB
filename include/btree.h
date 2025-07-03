@@ -32,7 +32,6 @@ void btree_destroy(BTree *btree);
 
 bool btree_insert(BTree *btree, uint32_t key, RowId value);
 RowId* btree_find(BTree *btree, uint32_t key);
-bool btree_delete(BTree *btree, uint32_t key);
 
 typedef struct {
     BTree *btree;

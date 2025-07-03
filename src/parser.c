@@ -350,10 +350,6 @@ Statement* parse_sql(const char* sql) {
         return parse_insert(&scanner);
     } else if (match_keyword(&scanner, "SELECT")) {
         return parse_select(&scanner);
-    } else if (match_keyword(&scanner, "UPDATE")) {
-        // TODO: Implement UPDATE parsing
-    } else if (match_keyword(&scanner, "DELETE")) {
-        // TODO: Implement DELETE parsing
     }
     
     return NULL;
@@ -390,23 +386,6 @@ void statement_destroy(Statement* stmt) {
             }
             free(stmt->data.select.columns);
             expr_destroy(stmt->data.select.where_clause);
-            break;
-            
-        case STMT_UPDATE:
-            free(stmt->data.update.table_name);
-            for (uint32_t i = 0; i < stmt->data.update.update_count; i++) {
-                free(stmt->data.update.updates[i].column);
-                if (stmt->data.update.updates[i].value.type == TYPE_TEXT) {
-                    free(stmt->data.update.updates[i].value.value.text.data);
-                }
-            }
-            free(stmt->data.update.updates);
-            expr_destroy(stmt->data.update.where_clause);
-            break;
-            
-        case STMT_DELETE:
-            free(stmt->data.delete.table_name);
-            expr_destroy(stmt->data.delete.where_clause);
             break;
     }
     

@@ -10,8 +10,6 @@ typedef enum {
     PLAN_TABLE_SCAN,
     PLAN_INDEX_SCAN,
     PLAN_INSERT,
-    PLAN_UPDATE,
-    PLAN_DELETE,
     PLAN_CREATE_TABLE
 } PlanType;
 
@@ -28,15 +26,6 @@ typedef struct QueryPlan {
             Value *values;
             uint32_t value_count;
         } insert;
-        struct {
-            Expr *filter;
-            uint32_t *columns;
-            Value *values;
-            uint32_t update_count;
-        } update;
-        struct {
-            Expr *filter;
-        } delete;
         struct {
             CreateTableStmt *stmt;
         } create_table;

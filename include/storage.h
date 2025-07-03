@@ -66,7 +66,6 @@ void value_destroy(Value *value);
 // Table storage operations
 RowId table_insert_row(Table *table, Pager *pager, Row *row);
 Row* table_get_row(Table *table, Pager *pager, RowId row_id);
-bool table_delete_row(Table *table, Pager *pager, RowId row_id);
 
 // Table scanning
 typedef struct {

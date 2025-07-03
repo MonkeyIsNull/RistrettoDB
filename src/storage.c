@@ -246,13 +246,6 @@ Row* table_get_row(Table *table, Pager *pager, RowId row_id) {
     return row;
 }
 
-bool table_delete_row(Table *table, Pager *pager, RowId row_id) {
-    // TODO: Implement row deletion
-    (void)table;
-    (void)pager;
-    (void)row_id;
-    return false;
-}
 
 TableScanner* table_scanner_create(Table *table, Pager *pager) {
     TableScanner* scanner = malloc(sizeof(TableScanner));
