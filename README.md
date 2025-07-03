@@ -3,7 +3,7 @@
 
 > "Bygget på koffein og høy hastighet!"
 
-A tiny, blazingly fast, embeddable append-only SQL engine written in C that delivers **2.82x performance improvement** over SQLite for specialized workloads.
+A tiny, blazingly fast, embeddable append-only SQL engine written in C that delivers **4.57x performance improvement** over SQLite with **4.6 million rows/second** throughput and **215ns per row** latency.
 
 ## What is RistrettoDB?
 
@@ -141,6 +141,9 @@ make debug
 # Run tests
 make test
 
+# Run Table V2 tests
+make test-v2
+
 # Clean build artifacts
 make clean
 
@@ -189,6 +192,36 @@ id | name | score
 
 ### Programmatic Usage
 
+#### Ultra-Fast Table V2 API
+
+```c
+#include "table_v2.h"
+
+int main() {
+    // Create ultra-fast table with schema
+    Table* table = table_create("events", 
+        "CREATE TABLE events (timestamp INTEGER, user_id INTEGER, event TEXT(32))");
+    
+    // Ultra-fast row insertion (4.6M rows/sec)
+    Value values[3];
+    values[0] = value_integer(1672531200);  // timestamp
+    values[1] = value_integer(12345);       // user_id  
+    values[2] = value_text("user_login");   // event
+    
+    table_append_row(table, values);
+    
+    // Query with callback
+    table_select(table, NULL, my_callback, NULL);
+    
+    // Clean up
+    value_destroy(&values[2]);
+    table_close(table);
+    return 0;
+}
+```
+
+#### Original SQL API
+
 ```c
 #include "db.h"
 
@@ -235,12 +268,14 @@ make benchmark
 make benchmark-vs-sqlite      # Head-to-head comparison
 make benchmark-micro          # Detailed performance analysis
 make benchmark-speedtest      # SQLite speedtest1 subset
+make benchmark-ultra-fast     # Ultra-fast write performance
 
 # Build benchmark executables only
 make benchmark-build
 ```
 
 The benchmark suite includes:
+- **Ultra-fast benchmark** measuring peak write performance (4.6M rows/sec)
 - **Direct comparison** with SQLite on equivalent operations
 - **Microbenchmarks** measuring CPU time, memory usage, and throughput
 - **SpeedTest1 subset** based on SQLite's official benchmark
@@ -252,6 +287,16 @@ See `benchmark/README.md` for detailed benchmarking documentation.
 
 ### Benchmarks vs SQLite (Measured Results)
 
+#### Ultra-Fast Write Performance (Table V2)
+
+| Metric | RistrettoDB V2 | SQLite | Performance Gain |
+|--------|----------------|--------|------------------|
+| **Throughput** | **4.6 million rows/sec** | 1.0 million rows/sec | **4.57x faster** |
+| **Latency** | **215 ns/row** | 984 ns/row | **4.57x lower** |
+| **Test size** | 100K rows | 100K rows | Same workload |
+
+#### Original Implementation Comparison
+
 | Operation | RistrettoDB Time | SQLite Time | Speedup |
 |-----------|------------------|-------------|---------|
 | Sequential INSERT (10K rows) | 8.03 ms | 23.30 ms | **2.90x** |
@@ -262,25 +307,37 @@ See `benchmark/README.md` for detailed benchmarking documentation.
 
 *Benchmarked on Apple Silicon with clang -O3 -march=native. SQLite configured with synchronous=OFF, journal_mode=OFF for fair comparison.*
 
-### When to Use RistrettoDB
+### Ideal Use Cases
 
-**Good for:**
-- Append-only data logging and analytics
-- Time-series data collection
-- Event sourcing systems
-- Embedded applications with predictable data patterns
-- Read-heavy workloads with simple queries
-- Applications requiring minimal memory footprint
-- Systems where SQL subset is sufficient
-- Performance-critical data processing
+RistrettoDB excels in scenarios requiring **ultra-fast writes** with **simple schemas** and **append-only patterns**:
 
-**Not suitable for:**
+| Domain              | Examples                      | Why It Works Well                |
+| ------------------- | ----------------------------- | -------------------------------- |
+| Network systems     | Metadata-only packet logging  | High-speed insert, small rows    |
+| Security logging    | Audit trails, sudo, auth logs | Fast + immutable                 |
+| Embedded systems    | Sensors, telemetry, IoT logs  | Fixed-size + zero-dependency     |
+| Analytics ingestion | Events, clickstream, traces   | Scalable insert + compact schema |
+| Edge logging        | Drones, robotics, car systems | Works offline, no heap overhead  |
+| Compliance          | Immutable records, read-only  | Append-only = tamper-evident     |
+
+### Performance Sweet Spots
+
+**Excellent for:**
+- **Write-heavy workloads** (>100K inserts/sec)
+- **Structured logging** with fixed schemas
+- **Time-series data** collection
+- **Event sourcing** systems
+- **Embedded applications** with memory constraints
+- **Real-time analytics** ingestion
+- **Audit trails** requiring immutability
+
+**Not recommended for:**
 - Applications requiring UPDATE or DELETE operations
-- Complex SQL queries (JOINs, subqueries)
+- Complex SQL queries (JOINs, subqueries, transactions)
 - Concurrent write-heavy workloads
-- Applications requiring ACID transactions
 - Large-scale multi-user databases
 - Applications needing schema flexibility
+- General-purpose OLTP systems
 
 ## Current Limitations
 
@@ -301,7 +358,8 @@ See `benchmark/README.md` for detailed benchmarking documentation.
 RistrettoDB/
 ├── src/           # Source files
 │   ├── main.c     # CLI REPL
-│   ├── db.c       # Top-level API
+│   ├── db.c       # Top-level API (original)
+│   ├── table_v2.c # Ultra-fast table engine
 │   ├── pager.c    # Memory-mapped storage
 │   ├── storage.c  # Row format and table scanning
 │   ├── btree.c    # B+Tree implementation
@@ -310,10 +368,32 @@ RistrettoDB/
 │   ├── simd.c     # SIMD optimizations
 │   └── util.c     # Utilities
 ├── include/       # Header files
+│   ├── table_v2.h # Ultra-fast table API
+│   └── ...        # Other headers
 ├── tests/         # Test suite
+├── benchmark/     # Performance benchmarks
 ├── bin/          # Built binaries
 └── build/        # Build artifacts
 ```
+
+### Architecture
+
+RistrettoDB provides two complementary implementations:
+
+**Table V2 (Ultra-Fast Engine)**
+- Memory-mapped append-only files
+- Fixed-width row format  
+- 4.6M rows/sec throughput
+- 215ns per row latency
+- Schema-based tables with types
+- Best for: High-speed logging, telemetry, event streams
+
+**Original Implementation**
+- B+Tree indexed storage
+- Variable-width rows
+- 2.8x faster than SQLite overall
+- Full SQL parser integration
+- Best for: General embedded SQL needs
 
 ### Contributing
 

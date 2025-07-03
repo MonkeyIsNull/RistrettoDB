@@ -18,7 +18,7 @@ RISTRETTO_LIB_SOURCES = $(filter-out $(RISTRETTO_SRC_DIR)/main.c, $(RISTRETTO_SO
 RISTRETTO_LIB_OBJECTS = $(RISTRETTO_LIB_SOURCES:$(RISTRETTO_SRC_DIR)/%.c=%.o)
 
 # Benchmark executables
-BENCHMARKS = benchmark microbench speedtest_subset
+BENCHMARKS = benchmark microbench speedtest_subset ultra_fast_benchmark
 
 # Include paths
 INCLUDES = -I$(RISTRETTO_INC_DIR)
@@ -47,6 +47,9 @@ $(BIN_DIR)/microbench: $(SRC_DIR)/microbench.c $(RISTRETTO_LIB_OBJECTS) | $(BIN_
 $(BIN_DIR)/speedtest_subset: $(SRC_DIR)/speedtest_subset.c $(RISTRETTO_LIB_OBJECTS) | $(BIN_DIR)
 	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $< $(RISTRETTO_LIB_OBJECTS) $(LDFLAGS)
 
+$(BIN_DIR)/ultra_fast_benchmark: $(SRC_DIR)/ultra_fast_benchmark.c table_v2.o | $(BIN_DIR)
+	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $< table_v2.o $(LDFLAGS)
+
 # Run all benchmarks
 run-all: benchmarks
 	@echo "Running comprehensive benchmark suite..."
@@ -70,6 +73,10 @@ run-microbench: $(BIN_DIR)/microbench
 
 run-speedtest: $(BIN_DIR)/speedtest_subset
 	$(BIN_DIR)/speedtest_subset
+
+# Ultra-fast benchmark
+run-ultra-fast: $(BIN_DIR)/ultra_fast_benchmark
+	$(BIN_DIR)/ultra_fast_benchmark
 
 # Performance analysis targets
 profile-benchmark: $(BIN_DIR)/benchmark
