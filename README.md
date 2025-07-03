@@ -101,7 +101,38 @@ RistrettoDB is engineered for maximum performance through several key optimizati
 3. **Execute** → Run hard-coded execution paths
 4. **Storage** → Direct memory-mapped file access
 
-### Data Storage Layout
+### Data Storage Layouts
+
+RistrettoDB supports two storage formats optimized for different use cases:
+
+#### Table V2 Ultra-Fast Format (table_v2.c)
+
+```
+File Layout (per table):
+┌─────────────────────────────────────────────────────────────┐
+│                    TableHeader (256 bytes)                 │
+│  Magic(8) | Version(4) | RowSize(4) | NumRows(8) | ...    │
+│  ColumnDescs[14] (16 bytes each) | Reserved(12)           │
+├─────────────────────────────────────────────────────────────┤
+│                         Row Data                            │
+│  Row 0 (fixed-width) | Row 1 | Row 2 | ... | Row N       │
+└─────────────────────────────────────────────────────────────┘
+
+Row Layout (Fixed-Width, Memory-Aligned):
+┌─────────────┬─────────────┬─────────────┬─────────────┐
+│  Column 1   │  Column 2   │  Column 3   │    ...      │
+│ INTEGER(8)  │ TEXT(32)    │ REAL(8)     │             │
+│ @ offset 0  │ @ offset 8  │ @ offset 40 │             │
+└─────────────┴─────────────┴─────────────┴─────────────┘
+
+Features:
+• Zero-copy memory-mapped access
+• Fixed-width rows for predictable performance  
+• Direct append writes (4.6M rows/sec)
+• File grows in 1MB+ blocks
+```
+
+#### Original B+Tree Format (storage.c/btree.c)
 
 ```
 File Layout:
@@ -113,14 +144,14 @@ File Layout:
 Page Layout:
 ┌─────────────┬─────────────┬─────────────┬─────────────┐
 │ Page Header │    Row 1    │    Row 2    │    ...      │
-│ (8 bytes)   │ (fixed)     │ (fixed)     │             │
+│ (8 bytes)   │ (variable)  │ (variable)  │             │
 └─────────────┴─────────────┴─────────────┴─────────────┘
 
-Row Layout (Fixed-Width):
-┌─────────────┬─────────────┬─────────────┬─────────────┐
-│  Column 1   │  Column 2   │  Column 3   │    ...      │
-│ (aligned)   │ (aligned)   │ (aligned)   │             │
-└─────────────┴─────────────┴─────────────┴─────────────┘
+Features:
+• B+Tree indexed access
+• Variable-width rows
+• SQL parser integration
+• 2.8x faster than SQLite
 ```
 
 ## Building
