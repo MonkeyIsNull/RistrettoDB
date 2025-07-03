@@ -1,0 +1,71 @@
+# Compiled object files, shared libs, executables
+*.o
+*.so
+*.a
+*.out
+*.exe
+*.dll
+
+# MacOS system files
+.DS_Store
+
+# Build directories
+/build/
+/dist/
+/bin/
+/target/
+
+# Rust
+/target/
+**/*.rs.bk
+
+# C/C++ specific
+*.dSYM
+*.gcno
+*.gcda
+*.gcov
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.bak
+
+# IDEs and editors
+.vscode/
+.idea/
+*.iml
+
+# Git files
+*.orig
+*.patch
+*.rej
+
+# OS junk files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+CLAUDE.md
+
+# Ristretto Stuff
+*.db
