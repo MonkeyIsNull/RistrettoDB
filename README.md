@@ -176,6 +176,12 @@ make test
 # Run Table V2 tests
 make test-v2
 
+# Run comprehensive test suite (validates all programming manual claims)
+make test-comprehensive
+
+# Run all test suites
+make test-all
+
 # Clean build artifacts
 make clean
 
@@ -195,6 +201,8 @@ The manual includes:
 - Real-world use cases (IoT telemetry, security logging, analytics)
 - Performance optimization techniques
 - Best practices and troubleshooting
+
+> 📋 **Testing**: Run `make test-comprehensive` to validate all programming manual examples and performance claims work correctly on your system.
 
 ## Usage Examples
 

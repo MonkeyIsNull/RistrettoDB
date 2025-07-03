@@ -12,7 +12,8 @@ A comprehensive guide to building high-performance applications with RistrettoDB
 6. [Real-World Examples](#real-world-examples)
 7. [Performance Optimization](#performance-optimization)
 8. [Best Practices](#best-practices)
-9. [Troubleshooting](#troubleshooting)
+9. [Testing and Validation](#testing-and-validation)
+10. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -33,6 +34,8 @@ RistrettoDB provides **two complementary database engines** optimized for differ
 - **File**: `#include "table_v2.h"`
 
 **Key Decision**: Use Table V2 for write-heavy workloads requiring maximum speed. Use Original for general SQL compatibility.
+
+> 🧪 **Validation**: All examples in this manual are validated by a comprehensive test suite. Run `make test-comprehensive` to verify everything works correctly on your system.
 
 ---
 
@@ -67,6 +70,9 @@ make debug
 # Run tests
 make test          # Original API tests
 make test-v2       # Table V2 tests
+make test-comprehensive    # Validates ALL manual examples
+make test-stress   # High-volume performance tests
+make test-all      # Run all test suites
 
 # Run benchmarks
 make benchmark-ultra-fast    # V2 performance test
@@ -1757,6 +1763,64 @@ void profile_operations(Table* table) {
            table_get_row_count(table) / scan_time);
 }
 ```
+
+---
+
+## Testing and Validation
+
+### Comprehensive Test Suite
+
+RistrettoDB includes a comprehensive test suite that validates all examples in this programming manual:
+
+```bash
+# Run the comprehensive test suite
+make test-comprehensive
+```
+
+**What it tests:**
+- ✅ All Table V2 API examples from this manual
+- ✅ Schema parsing and value type handling
+- ✅ High-speed insertion performance claims
+- ✅ Memory management best practices
+- ✅ Real-world scenarios (IoT, security, analytics)
+- ✅ Performance targets (>1M rows/sec, <1000ns latency)
+- ✅ File growth and error handling
+
+**Expected Results:**
+```
+RistrettoDB Comprehensive Test Suite
+====================================
+Validating all programming manual claims...
+
+✅ All programming manual claims validated
+✅ Real-world scenarios working
+✅ Error handling robust
+✅ Performance claims verified
+
+Total tests: 14
+Passed: 14
+Failed: 0
+```
+
+### Other Test Suites
+
+```bash
+# Individual test suites
+make test-v2        # Table V2 basic functionality
+make test-stress    # High-volume stress testing
+make test-original  # Original SQL API validation
+make test-all       # Run all test suites
+```
+
+### Performance Validation
+
+The test suite validates these performance claims:
+- **Throughput**: >1M rows/sec (typically achieves 7-11M rows/sec)
+- **Latency**: <1000ns per row (typically achieves 88-215ns)
+- **Memory**: Efficient handling of large text fields
+- **Scalability**: File growth up to multiple GB
+
+> 💡 **Tip**: Run `make test-comprehensive` after building to ensure all examples work correctly on your specific system configuration.
 
 ---
 

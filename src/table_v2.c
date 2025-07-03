@@ -108,7 +108,7 @@ bool table_parse_schema(const char *schema_sql, ColumnDesc *columns,
         char type_str[32] = {0};
         int length = 0;
         
-        if (sscanf(col_def, " %7s %31s", name, type_str) < 2) {
+        if (sscanf(col_def, " %31s %31s", name, type_str) < 2) {
             break;
         }
         
