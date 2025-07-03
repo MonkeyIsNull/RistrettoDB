@@ -69,3 +69,6 @@ CLAUDE.md
 
 # Ristretto Stuff
 *.db
+# Ignore accidentally created top-level binary
+/ristretto
+

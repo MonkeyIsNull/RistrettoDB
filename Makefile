@@ -9,6 +9,7 @@ SRC_DIR = src
 INCLUDE_DIR = include
 TEST_DIR = tests
 BUILD_DIR = build
+BIN_DIR = bin
 
 SOURCES = $(wildcard $(SRC_DIR)/*.c)
 OBJECTS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SOURCES))
@@ -19,15 +20,18 @@ TEST_OBJECTS = $(patsubst $(TEST_DIR)/%.c,$(BUILD_DIR)/test_%.o,$(TEST_SOURCES))
 
 .PHONY: all clean debug test run
 
-all: $(BUILD_DIR) $(TARGET)
+all: $(BUILD_DIR) $(BIN_DIR) $(BIN_DIR)/$(TARGET)
 
 debug: CFLAGS += $(DEBUGFLAGS)
-debug: clean $(TARGET)
+debug: clean $(BIN_DIR)/$(TARGET)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(TARGET): $(OBJECTS)
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
+
+$(BIN_DIR)/$(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c $(HEADERS)
@@ -36,17 +40,17 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c $(HEADERS)
 $(BUILD_DIR)/test_%.o: $(TEST_DIR)/%.c $(HEADERS)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-test: $(TEST_TARGET)
-	./$(TEST_TARGET)
+test: $(BIN_DIR)/$(TEST_TARGET)
+	$(BIN_DIR)/$(TEST_TARGET)
 
-$(TEST_TARGET): $(filter-out $(BUILD_DIR)/main.o,$(OBJECTS)) $(TEST_OBJECTS)
+$(BIN_DIR)/$(TEST_TARGET): $(filter-out $(BUILD_DIR)/main.o,$(OBJECTS)) $(TEST_OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-run: $(TARGET)
-	./$(TARGET)
+run: $(BIN_DIR)/$(TARGET)
+	$(BIN_DIR)/$(TARGET)
 
 clean:
-	rm -rf $(BUILD_DIR) $(TARGET) $(TEST_TARGET)
+	rm -rf $(BUILD_DIR) $(BIN_DIR)
 
 format:
 	clang-format -i $(SRC_DIR)/*.c $(INCLUDE_DIR)/*.h $(TEST_DIR)/*.c
