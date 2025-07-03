@@ -1,6 +1,8 @@
 # RistrettoDB
 ![ristretto Logo](ristretto_logo.png)
 
+> "Bygget på koffein og høy hastighet!"
+
 A tiny, blazingly fast, embeddable append-only SQL engine written in C, designed to outperform SQLite in narrowly optimized scenarios.
 
 ## What is RistrettoDB?
