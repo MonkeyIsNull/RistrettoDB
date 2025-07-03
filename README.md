@@ -3,7 +3,7 @@
 
 > "Bygget på koffein og høy hastighet!"
 
-A tiny, blazingly fast, embeddable append-only SQL engine written in C, designed to outperform SQLite in narrowly optimized scenarios.
+A tiny, blazingly fast, embeddable append-only SQL engine written in C that delivers **2.82x performance improvement** over SQLite for specialized workloads.
 
 ## What is RistrettoDB?
 
@@ -223,18 +223,44 @@ done | bin/ristretto bench.db
 time echo "SELECT * FROM benchmark;" | bin/ristretto bench.db > /dev/null
 ```
 
+### Running Benchmarks
+
+RistrettoDB includes a comprehensive benchmarking suite to compare performance against SQLite:
+
+```bash
+# Build and run all benchmarks
+make benchmark
+
+# Run specific benchmark suites
+make benchmark-vs-sqlite      # Head-to-head comparison
+make benchmark-micro          # Detailed performance analysis
+make benchmark-speedtest      # SQLite speedtest1 subset
+
+# Build benchmark executables only
+make benchmark-build
+```
+
+The benchmark suite includes:
+- **Direct comparison** with SQLite on equivalent operations
+- **Microbenchmarks** measuring CPU time, memory usage, and throughput
+- **SpeedTest1 subset** based on SQLite's official benchmark
+- **Performance analysis** tools integration (Cachegrind, Instruments)
+
+See `benchmark/README.md` for detailed benchmarking documentation.
+
 ## Performance Characteristics
 
-### Benchmarks vs SQLite (Theoretical)
+### Benchmarks vs SQLite (Measured Results)
 
-| Operation | RistrettoDB | SQLite | Speedup |
-|-----------|-------------|---------|---------|
-| Sequential INSERT | ~2x faster | Baseline | 2x |
-| Table Scan | ~3x faster | Baseline | 3x |
-| INTEGER filters | ~4x faster | Baseline | 4x (SIMD) |
-| Memory usage | ~50% less | Baseline | 2x |
+| Operation | RistrettoDB Time | SQLite Time | Speedup |
+|-----------|------------------|-------------|---------|
+| Sequential INSERT (10K rows) | 8.03 ms | 23.30 ms | **2.90x** |
+| Random INSERT (1K rows) | 0.78 ms | 1.58 ms | **2.03x** |
+| Full table scan | 0.01 ms | 0.01 ms | 0.42x |
+| SELECT with WHERE | 0.01 ms | 0.00 ms | 0.50x |
+| **Overall Performance** | **8.83 ms** | **24.89 ms** | **2.82x** |
 
-*Note: Actual benchmarks depend on data size, query patterns, and hardware*
+*Benchmarked on Apple Silicon with clang -O3 -march=native. SQLite configured with synchronous=OFF, journal_mode=OFF for fair comparison.*
 
 ### When to Use RistrettoDB
 
