@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "pager.h"
 
 typedef enum {
     TYPE_NULL = 0,
@@ -36,6 +37,8 @@ typedef struct {
     Column *columns;
     size_t row_size;
     uint32_t root_page;
+    uint32_t row_count;
+    uint32_t next_row_id;
 } Table;
 
 typedef struct {
@@ -58,5 +61,26 @@ void row_destroy(Row *row);
 
 void row_set_value(Row *row, Table *table, uint32_t col_index, Value *value);
 Value* row_get_value(Row *row, Table *table, uint32_t col_index);
+void value_destroy(Value *value);
+
+// Table storage operations
+RowId table_insert_row(Table *table, Pager *pager, Row *row);
+Row* table_get_row(Table *table, Pager *pager, RowId row_id);
+bool table_delete_row(Table *table, Pager *pager, RowId row_id);
+
+// Table scanning
+typedef struct {
+    Table *table;
+    Pager *pager;
+    uint32_t current_page;
+    uint32_t current_offset;
+    uint32_t rows_scanned;
+    bool at_end;
+} TableScanner;
+
+TableScanner* table_scanner_create(Table *table, Pager *pager);
+void table_scanner_destroy(TableScanner *scanner);
+Row* table_scanner_next(TableScanner *scanner);
+bool table_scanner_at_end(TableScanner *scanner);
 
 #endif

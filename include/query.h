@@ -45,6 +45,7 @@ typedef struct QueryPlan {
 
 typedef struct {
     RistrettoDB *db;
+    Pager *pager;
     QueryPlan *plan;
     RistrettoCallback callback;
     void *callback_ctx;

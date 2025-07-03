@@ -38,6 +38,8 @@ Table* table_create(const char* name) {
     table->columns = NULL;
     table->row_size = 0;
     table->root_page = 0;
+    table->row_count = 0;
+    table->next_row_id = 1;
     
     return table;
 }
@@ -183,4 +185,135 @@ void value_destroy(Value* value) {
     }
     
     free(value);
+}
+
+// Page layout:
+// [page_header: 8 bytes][row_slots: variable]
+typedef struct {
+    uint32_t page_type;      // 0 = data page
+    uint32_t row_count;      // number of rows in this page
+} PageHeader;
+
+#define ROWS_PER_PAGE ((PAGE_SIZE - sizeof(PageHeader)) / sizeof(uint32_t))
+
+RowId table_insert_row(Table *table, Pager *pager, Row *row) {
+    // Simple implementation: always append to the last page
+    if (table->root_page == 0) {
+        table->root_page = pager_allocate_page(pager);
+        void* page = pager_get_page(pager, table->root_page);
+        PageHeader* header = (PageHeader*)page;
+        header->page_type = 0;
+        header->row_count = 0;
+    }
+    
+    void* page = pager_get_page(pager, table->root_page);
+    PageHeader* header = (PageHeader*)page;
+    
+    // Check if page has space
+    if (header->row_count * table->row_size + sizeof(PageHeader) + table->row_size > PAGE_SIZE) {
+        // TODO: Allocate new page or use B+tree
+        return (RowId){0, 0}; // Out of space
+    }
+    
+    // Copy row data to page
+    uint8_t* row_data = (uint8_t*)page + sizeof(PageHeader) + header->row_count * table->row_size;
+    memcpy(row_data, row->data, table->row_size);
+    
+    RowId row_id = {table->root_page, (uint16_t)(header->row_count * table->row_size + sizeof(PageHeader))};
+    header->row_count++;
+    table->row_count++;
+    
+    return row_id;
+}
+
+Row* table_get_row(Table *table, Pager *pager, RowId row_id) {
+    void* page = pager_get_page(pager, row_id.page_id);
+    if (!page) return NULL;
+    
+    uint8_t* row_data = (uint8_t*)page + row_id.offset;
+    
+    Row* row = malloc(sizeof(Row));
+    if (!row) return NULL;
+    
+    row->size = table->row_size;
+    row->data = malloc(table->row_size);
+    if (!row->data) {
+        free(row);
+        return NULL;
+    }
+    
+    memcpy(row->data, row_data, table->row_size);
+    return row;
+}
+
+bool table_delete_row(Table *table, Pager *pager, RowId row_id) {
+    // TODO: Implement row deletion
+    (void)table;
+    (void)pager;
+    (void)row_id;
+    return false;
+}
+
+TableScanner* table_scanner_create(Table *table, Pager *pager) {
+    TableScanner* scanner = malloc(sizeof(TableScanner));
+    if (!scanner) return NULL;
+    
+    scanner->table = table;
+    scanner->pager = pager;
+    scanner->current_page = table->root_page;
+    scanner->current_offset = sizeof(PageHeader);
+    scanner->rows_scanned = 0;
+    scanner->at_end = (table->row_count == 0);
+    
+    return scanner;
+}
+
+void table_scanner_destroy(TableScanner *scanner) {
+    free(scanner);
+}
+
+Row* table_scanner_next(TableScanner *scanner) {
+    if (scanner->at_end || scanner->rows_scanned >= scanner->table->row_count) {
+        scanner->at_end = true;
+        return NULL;
+    }
+    
+    void* page = pager_get_page(scanner->pager, scanner->current_page);
+    if (!page) {
+        scanner->at_end = true;
+        return NULL;
+    }
+    
+    PageHeader* header = (PageHeader*)page;
+    uint32_t row_index = (scanner->current_offset - sizeof(PageHeader)) / scanner->table->row_size;
+    
+    if (row_index >= header->row_count) {
+        // TODO: Move to next page
+        scanner->at_end = true;
+        return NULL;
+    }
+    
+    uint8_t* row_data = (uint8_t*)page + scanner->current_offset;
+    
+    Row* row = malloc(sizeof(Row));
+    if (!row) return NULL;
+    
+    row->size = scanner->table->row_size;
+    row->data = malloc(scanner->table->row_size);
+    if (!row->data) {
+        free(row);
+        return NULL;
+    }
+    
+    memcpy(row->data, row_data, scanner->table->row_size);
+    
+    // Advance to next row
+    scanner->current_offset += scanner->table->row_size;
+    scanner->rows_scanned++;
+    
+    return row;
+}
+
+bool table_scanner_at_end(TableScanner *scanner) {
+    return scanner->at_end;
 }

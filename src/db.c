@@ -62,6 +62,7 @@ RistrettoResult ristretto_exec(RistrettoDB* db, const char* sql) {
     
     QueryContext ctx = {
         .db = db,
+        .pager = db->pager,
         .plan = plan,
         .callback = NULL,
         .callback_ctx = NULL
@@ -90,6 +91,7 @@ RistrettoResult ristretto_query(RistrettoDB* db, const char* sql,
     
     QueryContext query_ctx = {
         .db = db,
+        .pager = db->pager,
         .plan = plan,
         .callback = callback,
         .callback_ctx = ctx

@@ -15,8 +15,10 @@ typedef struct {
 } TableCatalog;
 
 static TableCatalog* get_catalog(RistrettoDB* db) {
-    // TODO: This should be stored in the database struct
+    // For now, use a global catalog per process
+    // In a real implementation, this would be stored in the database file
     static TableCatalog catalog = {NULL, 0, 0};
+    (void)db; // Suppress unused parameter warning
     return &catalog;
 }
 
@@ -196,15 +198,46 @@ static RistrettoResult execute_insert(QueryContext* ctx) {
         row_set_value(row, table, i, &values[i]);
     }
     
-    // TODO: Actually insert the row into storage
-    // For now, just clean up
+    // Insert row into storage
+    RowId row_id = table_insert_row(table, ctx->pager, row);
     row_destroy(row);
+    
+    if (row_id.page_id == 0) {
+        return RISTRETTO_ERROR; // Failed to insert
+    }
     
     return RISTRETTO_OK;
 }
 
+static char* value_to_string(Value* value) {
+    if (!value) return strdup("NULL");
+    
+    switch (value->type) {
+        case TYPE_NULL:
+            return strdup("NULL");
+        case TYPE_INTEGER: {
+            char* str = malloc(32);
+            snprintf(str, 32, "%lld", (long long)value->value.integer);
+            return str;
+        }
+        case TYPE_REAL: {
+            char* str = malloc(32);
+            snprintf(str, 32, "%.6g", value->value.real);
+            return str;
+        }
+        case TYPE_TEXT:
+            return strdup(value->value.text.data ? value->value.text.data : "NULL");
+        default:
+            return strdup("?");
+    }
+}
+
 static RistrettoResult execute_select(QueryContext* ctx) {
     Table* table = ctx->plan->table;
+    
+    if (!ctx->callback) {
+        return RISTRETTO_OK; // No callback to send results to
+    }
     
     // Prepare column names
     char** col_names = malloc(table->column_count * sizeof(char*));
@@ -214,9 +247,42 @@ static RistrettoResult execute_select(QueryContext* ctx) {
         col_names[i] = table->columns[i].name;
     }
     
-    // TODO: Actually scan the table and return rows
-    // For now, just return empty result
+    // Scan the table
+    TableScanner* scanner = table_scanner_create(table, ctx->pager);
+    if (!scanner) {
+        free(col_names);
+        return RISTRETTO_NOMEM;
+    }
     
+    while (!table_scanner_at_end(scanner)) {
+        Row* row = table_scanner_next(scanner);
+        if (!row) break;
+        
+        // Convert row values to strings
+        char** values = malloc(table->column_count * sizeof(char*));
+        if (!values) {
+            row_destroy(row);
+            continue;
+        }
+        
+        for (uint32_t i = 0; i < table->column_count; i++) {
+            Value* val = row_get_value(row, table, i);
+            values[i] = value_to_string(val);
+            value_destroy(val);
+        }
+        
+        // Call the callback
+        ctx->callback(ctx->callback_ctx, table->column_count, values, col_names);
+        
+        // Clean up
+        for (uint32_t i = 0; i < table->column_count; i++) {
+            free(values[i]);
+        }
+        free(values);
+        row_destroy(row);
+    }
+    
+    table_scanner_destroy(scanner);
     free(col_names);
     return RISTRETTO_OK;
 }
