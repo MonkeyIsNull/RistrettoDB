@@ -297,7 +297,7 @@ RistrettoDB/
 
 ## License
 
-[Add your license here]
+MIT License - see LICENSE file for details.
 
 ## Inspiration
 
