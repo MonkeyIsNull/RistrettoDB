@@ -25,7 +25,7 @@ static size_t align_offset(size_t offset) {
     return (offset + ALIGN_SIZE - 1) & ~(ALIGN_SIZE - 1);
 }
 
-Table* table_create(const char* name) {
+Table* storage_table_create(const char* name) {
     Table* table = malloc(sizeof(Table));
     if (!table) {
         return NULL;
@@ -44,7 +44,7 @@ Table* table_create(const char* name) {
     return table;
 }
 
-void table_destroy(Table* table) {
+void storage_table_destroy(Table* table) {
     if (!table) {
         return;
     }
@@ -53,7 +53,7 @@ void table_destroy(Table* table) {
     free(table);
 }
 
-void table_add_column(Table* table, const char* name, DataType type) {
+void storage_table_add_column(Table* table, const char* name, DataType type) {
     uint32_t new_count = table->column_count + 1;
     Column* new_columns = realloc(table->columns, new_count * sizeof(Column));
     if (!new_columns) {
@@ -74,7 +74,7 @@ void table_add_column(Table* table, const char* name, DataType type) {
     table->column_count = new_count;
 }
 
-Row* row_create(Table* table) {
+Row* storage_row_create(Table* table) {
     Row* row = malloc(sizeof(Row));
     if (!row) {
         return NULL;
@@ -90,7 +90,7 @@ Row* row_create(Table* table) {
     return row;
 }
 
-void row_destroy(Row* row) {
+void storage_row_destroy(Row* row) {
     if (!row) {
         return;
     }
@@ -99,7 +99,7 @@ void row_destroy(Row* row) {
     free(row);
 }
 
-void row_set_value(Row* row, Table* table, uint32_t col_index, Value* value) {
+void storage_row_set_value(Row* row, Table* table, uint32_t col_index, Value* value) {
     if (col_index >= table->column_count) {
         return;
     }
@@ -136,7 +136,7 @@ void row_set_value(Row* row, Table* table, uint32_t col_index, Value* value) {
     }
 }
 
-Value* row_get_value(Row* row, Table* table, uint32_t col_index) {
+Value* storage_row_get_value(Row* row, Table* table, uint32_t col_index) {
     if (col_index >= table->column_count) {
         return NULL;
     }
@@ -175,7 +175,7 @@ Value* row_get_value(Row* row, Table* table, uint32_t col_index) {
     return value;
 }
 
-void value_destroy(Value* value) {
+void storage_value_destroy(Value* value) {
     if (!value) {
         return;
     }

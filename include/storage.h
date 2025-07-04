@@ -51,17 +51,17 @@ typedef struct {
     size_t size;
 } Row;
 
-Table* table_create(const char *name);
-void table_destroy(Table *table);
+Table* storage_table_create(const char *name);
+void storage_table_destroy(Table *table);
 
-void table_add_column(Table *table, const char *name, DataType type);
+void storage_table_add_column(Table *table, const char *name, DataType type);
 
-Row* row_create(Table *table);
-void row_destroy(Row *row);
+Row* storage_row_create(Table *table);
+void storage_row_destroy(Row *row);
 
-void row_set_value(Row *row, Table *table, uint32_t col_index, Value *value);
-Value* row_get_value(Row *row, Table *table, uint32_t col_index);
-void value_destroy(Value *value);
+void storage_row_set_value(Row *row, Table *table, uint32_t col_index, Value *value);
+Value* storage_row_get_value(Row *row, Table *table, uint32_t col_index);
+void storage_value_destroy(Value *value);
 
 // Table storage operations
 RowId table_insert_row(Table *table, Pager *pager, Row *row);

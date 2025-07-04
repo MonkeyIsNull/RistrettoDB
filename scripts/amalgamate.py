@@ -1,0 +1,409 @@
+#!/usr/bin/env python3
+"""
+RistrettoDB Amalgamation Script
+
+This script creates a single-file amalgamation of RistrettoDB source code,
+similar to SQLite's amalgamation. The result is a single ristretto.c file
+that can be easily embedded in projects.
+
+Usage:
+    python3 scripts/amalgamate.py
+    
+Output:
+    ristretto.c - Single source file containing all library code
+    ristretto.h - Public header file (already exists)
+"""
+
+import os
+import re
+import sys
+from pathlib import Path
+
+def read_file(filepath):
+    """Read file content with error handling"""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception as e:
+        print(f"Error reading {filepath}: {e}")
+        return None
+
+def write_file(filepath, content):
+    """Write file content with error handling"""
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"Created: {filepath}")
+        return True
+    except Exception as e:
+        print(f"Error writing {filepath}: {e}")
+        return False
+
+def process_includes(content, processed_files, base_dir):
+    """
+    Process #include directives, replacing local includes with actual content
+    """
+    lines = content.split('\n')
+    result_lines = []
+    
+    for line in lines:
+        # Match #include "filename.h" (local includes)
+        local_include = re.match(r'^\s*#include\s+"([^"]+)"\s*$', line)
+        
+        if local_include:
+            include_file = local_include.group(1)
+            
+            # Skip the public header - it will be separate
+            if include_file == 'ristretto.h':
+                result_lines.append(line)
+                continue
+                
+            # Look for the file in include/ directory first, then current directory
+            include_path = None
+            possible_paths = [
+                os.path.join(base_dir, 'include', include_file),
+                os.path.join(base_dir, include_file),
+            ]
+            
+            for path in possible_paths:
+                if os.path.exists(path):
+                    include_path = path
+                    break
+                    
+            if include_path and include_path not in processed_files:
+                processed_files.add(include_path)
+                
+                # Read and process the included file
+                include_content = read_file(include_path)
+                if include_content:
+                    result_lines.append(f"/* BEGIN {include_file} */")
+                    
+                    # Process the included file's content recursively
+                    processed_include = process_includes(include_content, processed_files, base_dir)
+                    result_lines.append(processed_include)
+                    
+                    result_lines.append(f"/* END {include_file} */")
+                else:
+                    result_lines.append(f"/* ERROR: Could not read {include_file} */")
+                    result_lines.append(line)
+            else:
+                # Keep the include directive (external header or already processed)
+                result_lines.append(line)
+        else:
+            # Not an include directive, keep as is
+            result_lines.append(line)
+    
+    return '\n'.join(result_lines)
+
+def create_amalgamation():
+    """Create the RistrettoDB amalgamation"""
+    
+    # Get the project root directory
+    script_dir = Path(__file__).parent
+    project_root = script_dir.parent
+    
+    print(f"Project root: {project_root}")
+    
+    # Define source files to include (exclude CLI)
+    source_files = [
+        'src/version.c',      # Version info first
+        'src/util.c',         # Utilities
+        'src/pager.c',        # Page management
+        'src/btree.c',        # B+Tree implementation
+        'src/storage.c',      # Original storage engine
+        'src/simd.c',         # SIMD optimizations
+        'src/table_v2.c',     # Table V2 ultra-fast engine
+        'src/parser.c',       # SQL parser
+        'src/query.c',        # Query execution
+        'src/db.c',           # Top-level API
+    ]
+    
+    # Track processed files to avoid duplicates
+    processed_files = set()
+    
+    # Start building the amalgamation
+    amalgamation = []
+    
+    # Header comment
+    amalgamation.append("""/*
+** RistrettoDB Amalgamation
+**
+** This file contains the complete implementation of RistrettoDB in a single
+** source file. Simply compile this file along with your application.
+**
+** To use amalgamation (Option 1 - Self-contained):
+**   1. Include this ristretto.c file in your project
+**   2. Define RISTRETTO_AMALGAMATION before including
+**   3. Example:
+**      #define RISTRETTO_AMALGAMATION
+**      #include "ristretto.c"  // Note: .c not .h
+**
+** To use with separate header (Option 2):
+**   1. Include ristretto.h in your source files
+**   2. Compile ristretto.c separately
+**   3. Link together
+**
+** Generated by amalgamate.py
+** RistrettoDB Version: 2.0.0
+** Homepage: https://github.com/YourUsername/RistrettoDB
+*/
+
+#ifndef RISTRETTO_AMALGAMATION
+
+/* When used as a separate compilation unit, include the public header */
+#include "ristretto.h"
+
+#else
+
+/* 
+** When used as an amalgamation, provide all definitions inline
+** This section replaces ristretto.h when RISTRETTO_AMALGAMATION is defined
+*/
+
+#ifndef RISTRETTO_H
+#define RISTRETTO_H
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/*
+** RistrettoDB Version Information
+*/
+#define RISTRETTO_VERSION        "2.0.0"
+#define RISTRETTO_VERSION_NUMBER 2000000
+#define RISTRETTO_VERSION_MAJOR  2
+#define RISTRETTO_VERSION_MINOR  0
+#define RISTRETTO_VERSION_PATCH  0
+
+const char* ristretto_version(void);
+int ristretto_version_number(void);
+
+/*
+** Original SQL API
+*/
+typedef struct RistrettoDB RistrettoDB;
+
+typedef enum {
+    RISTRETTO_OK = 0,
+    RISTRETTO_ERROR = -1,
+    RISTRETTO_NOMEM = -2,
+    RISTRETTO_IO_ERROR = -3,
+    RISTRETTO_PARSE_ERROR = -4,
+    RISTRETTO_NOT_FOUND = -5,
+    RISTRETTO_CONSTRAINT_ERROR = -6
+} RistrettoResult;
+
+RistrettoDB* ristretto_open(const char* filename);
+void ristretto_close(RistrettoDB* db);
+RistrettoResult ristretto_exec(RistrettoDB* db, const char* sql);
+
+typedef void (*RistrettoCallback)(void* ctx, int n_cols, char** values, char** col_names);
+RistrettoResult ristretto_query(RistrettoDB* db, const char* sql, RistrettoCallback callback, void* ctx);
+const char* ristretto_error_string(RistrettoResult result);
+
+/*
+** Table V2 API Constants
+*/
+#define RISTRETTO_MAX_COLUMNS 14
+#define RISTRETTO_MAX_COLUMN_NAME 8
+#define RISTRETTO_TABLE_HEADER_SIZE 256
+#define RISTRETTO_INITIAL_FILE_SIZE (1024 * 1024)
+#define RISTRETTO_GROWTH_FACTOR 2
+#define RISTRETTO_SYNC_INTERVAL_ROWS 512
+#define RISTRETTO_SYNC_INTERVAL_MS 100
+#define RISTRETTO_TABLE_MAGIC "RSTRDB\\x00\\x00"
+#define RISTRETTO_TABLE_VERSION 1
+
+typedef enum {
+    RISTRETTO_COL_INTEGER = 1,
+    RISTRETTO_COL_REAL = 2,
+    RISTRETTO_COL_TEXT = 3,
+    RISTRETTO_COL_NULLABLE = 4
+} RistrettoColumnType;
+
+typedef struct RistrettoTable RistrettoTable;
+
+typedef struct {
+    RistrettoColumnType type;
+    union {
+        int64_t integer;
+        double real;
+        struct {
+            char *data;
+            size_t length;
+        } text;
+    } value;
+    bool is_null;
+} RistrettoValue;
+
+typedef struct {
+    char name[RISTRETTO_MAX_COLUMN_NAME];
+    uint8_t type;
+    uint8_t length;
+    uint16_t offset;
+    uint8_t reserved[4];
+} RistrettoColumnDesc;
+
+/*
+** Table V2 API Functions
+*/
+RistrettoTable* ristretto_table_create(const char *name, const char *schema_sql);
+RistrettoTable* ristretto_table_open(const char *name);
+void ristretto_table_close(RistrettoTable *table);
+
+bool ristretto_table_append_row(RistrettoTable *table, const RistrettoValue *values);
+bool ristretto_table_select(RistrettoTable *table, const char *where_clause,
+                           void (*callback)(void *ctx, const RistrettoValue *row), void *ctx);
+
+bool ristretto_table_flush(RistrettoTable *table);
+size_t ristretto_table_get_row_count(RistrettoTable *table);
+
+RistrettoValue ristretto_value_integer(int64_t val);
+RistrettoValue ristretto_value_real(double val);
+RistrettoValue ristretto_value_text(const char *str);
+RistrettoValue ristretto_value_null(void);
+void ristretto_value_destroy(RistrettoValue *value);
+
+/*
+** Compatibility layer (when using amalgamation)
+*/
+#define RistrettoDB                  RistrettoDB
+#define RistrettoResult              RistrettoResult
+#define RistrettoCallback            RistrettoCallback
+#define ristretto_open               ristretto_open
+#define ristretto_close              ristretto_close
+#define ristretto_exec               ristretto_exec
+#define ristretto_query              ristretto_query
+#define ristretto_error_string       ristretto_error_string
+
+#define Table                        RistrettoTable
+#define Value                        RistrettoValue
+#define ColumnDesc                   RistrettoColumnDesc
+#define ColumnType                   RistrettoColumnType
+#define COL_TYPE_INTEGER             RISTRETTO_COL_INTEGER
+#define COL_TYPE_REAL                RISTRETTO_COL_REAL
+#define COL_TYPE_TEXT                RISTRETTO_COL_TEXT
+#define COL_TYPE_NULLABLE            RISTRETTO_COL_NULLABLE
+#define MAX_COLUMNS                  RISTRETTO_MAX_COLUMNS
+#define MAX_COLUMN_NAME              RISTRETTO_MAX_COLUMN_NAME
+
+#define table_create                 ristretto_table_create
+#define table_open                   ristretto_table_open
+#define table_close                  ristretto_table_close
+#define table_append_row             ristretto_table_append_row
+#define table_select                 ristretto_table_select
+#define table_flush                  ristretto_table_flush
+#define table_get_row_count          ristretto_table_get_row_count
+#define value_integer                ristretto_value_integer
+#define value_real                   ristretto_value_real
+#define value_text                   ristretto_value_text
+#define value_null                   ristretto_value_null
+#define value_destroy                ristretto_value_destroy
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* RISTRETTO_H */
+
+#endif /* !RISTRETTO_AMALGAMATION */
+
+/* Standard library includes */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include <assert.h>
+#include <time.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+
+""")
+    
+    # Process each source file
+    for source_file in source_files:
+        source_path = project_root / source_file
+        
+        if not source_path.exists():
+            print(f"Warning: {source_file} not found, skipping")
+            continue
+            
+        print(f"Processing: {source_file}")
+        
+        content = read_file(source_path)
+        if not content:
+            continue
+            
+        # Add file separator
+        amalgamation.append(f"\n/* BEGIN {source_file} */\n")
+        
+        # Process includes in this file
+        processed_content = process_includes(content, processed_files, str(project_root))
+        
+        # Remove #include directives for system headers and local headers (already included)
+        lines = processed_content.split('\n')
+        filtered_lines = []
+        
+        for line in lines:
+            # Skip system includes, ristretto.h include, and local header includes
+            if (re.match(r'^\s*#include\s*<', line) or 
+                re.match(r'^\s*#include\s*"ristretto\.h"', line) or
+                re.match(r'^\s*#include\s*"[^"]+\.h"', line)):
+                continue
+            filtered_lines.append(line)
+        
+        amalgamation.append('\n'.join(filtered_lines))
+        amalgamation.append(f"\n/* END {source_file} */\n")
+    
+    # Combine everything
+    final_content = ''.join(amalgamation)
+    
+    # Write the amalgamation file
+    output_path = project_root / 'ristretto.c'
+    
+    if write_file(output_path, final_content):
+        print(f"\nAmalgamation created successfully!")
+        print(f"Output file: {output_path}")
+        print(f"Size: {len(final_content):,} characters")
+        
+        # Show basic statistics
+        lines = final_content.split('\n')
+        code_lines = [line for line in lines if line.strip() and not line.strip().startswith('//') and not line.strip().startswith('/*')]
+        
+        print(f"Total lines: {len(lines):,}")
+        print(f"Code lines: {len(code_lines):,}")
+        print()
+        print("To use the amalgamation:")
+        print("  1. Copy ristretto.h and ristretto.c to your project")
+        print("  2. Include ristretto.h in your source files")
+        print("  3. Compile ristretto.c with your project")
+        print("  4. Example: gcc -O3 -o myapp myapp.c ristretto.c")
+        
+        return True
+    
+    return False
+
+def main():
+    """Main function"""
+    print("RistrettoDB Amalgamation Generator")
+    print("==================================")
+    
+    if create_amalgamation():
+        print("\n✅ Amalgamation completed successfully!")
+        return 0
+    else:
+        print("\n❌ Amalgamation failed!")
+        return 1
+
+if __name__ == '__main__':
+    sys.exit(main())

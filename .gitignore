@@ -5,6 +5,7 @@
 *.out
 *.exe
 *.dll
+*.rdb
 
 # MacOS system files
 .DS_Store

@@ -129,19 +129,19 @@ static RistrettoResult execute_create_table(QueryContext* ctx) {
     }
     
     // Create new table
-    Table* table = table_create(stmt->table_name);
+    Table* table = storage_table_create(stmt->table_name);
     if (!table) {
         return RISTRETTO_NOMEM;
     }
     
     // Add columns
     for (uint32_t i = 0; i < stmt->column_count; i++) {
-        table_add_column(table, stmt->columns[i].name, stmt->columns[i].type);
+        storage_table_add_column(table, stmt->columns[i].name, stmt->columns[i].type);
     }
     
     // Register table
     if (!register_table(ctx->db, table)) {
-        table_destroy(table);
+        storage_table_destroy(table);
         return RISTRETTO_ERROR;
     }
     
@@ -180,19 +180,19 @@ static RistrettoResult execute_insert(QueryContext* ctx) {
     }
     
     // Create row
-    Row* row = row_create(table);
+    Row* row = storage_row_create(table);
     if (!row) {
         return RISTRETTO_NOMEM;
     }
     
     // Set values
     for (uint32_t i = 0; i < value_count; i++) {
-        row_set_value(row, table, i, &values[i]);
+        storage_row_set_value(row, table, i, &values[i]);
     }
     
     // Insert row into storage
     RowId row_id = table_insert_row(table, ctx->pager, row);
-    row_destroy(row);
+    storage_row_destroy(row);
     
     if (row_id.page_id == 0) {
         return RISTRETTO_ERROR; // Failed to insert
@@ -253,14 +253,14 @@ static RistrettoResult execute_select(QueryContext* ctx) {
         // Convert row values to strings
         char** values = malloc(table->column_count * sizeof(char*));
         if (!values) {
-            row_destroy(row);
+            storage_row_destroy(row);
             continue;
         }
         
         for (uint32_t i = 0; i < table->column_count; i++) {
-            Value* val = row_get_value(row, table, i);
+            Value* val = storage_row_get_value(row, table, i);
             values[i] = value_to_string(val);
-            value_destroy(val);
+            storage_value_destroy(val);
         }
         
         // Call the callback
@@ -271,7 +271,7 @@ static RistrettoResult execute_select(QueryContext* ctx) {
             free(values[i]);
         }
         free(values);
-        row_destroy(row);
+        storage_row_destroy(row);
     }
     
     table_scanner_destroy(scanner);

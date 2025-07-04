@@ -41,7 +41,7 @@ void ristretto_close(RistrettoDB* db) {
     }
     
     for (uint32_t i = 0; i < db->table_count; i++) {
-        table_destroy(db->tables[i]);
+        storage_table_destroy(db->tables[i]);
     }
     free(db->tables);
     
