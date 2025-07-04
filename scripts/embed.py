@@ -399,10 +399,10 @@ def main():
     print("==================================")
     
     if create_embedded():
-        print("\n✅ Embedded completed successfully!")
+        print("\nSUCCESS: Embedded completed successfully!")
         return 0
     else:
-        print("\n❌ Embedded failed!")
+        print("\nERROR: Embedded failed!")
         return 1
 
 if __name__ == '__main__':

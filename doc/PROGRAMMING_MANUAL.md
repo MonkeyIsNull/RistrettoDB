@@ -594,14 +594,14 @@ from ristretto import RistrettoDB
 #### Use Cases
 
 **Perfect for**:
-- 🌐 **Web Applications**: High-speed session storage, user analytics
-- 📊 **Data Analytics**: Real-time event ingestion, time-series data
-- 🤖 **Machine Learning**: Feature storage, training data preparation
-- 🏭 **IoT Systems**: Sensor data collection, device telemetry
-- 🔒 **Security**: Audit trails, tamper-evident logging
-- 🎮 **Gaming**: Player statistics, match analytics
-- 💰 **Finance**: Trading data, transaction logging
-- 📱 **Mobile Apps**: Offline data sync, local analytics
+- **Web Applications**: High-speed session storage, user analytics
+- **Data Analytics**: Real-time event ingestion, time-series data
+- **Machine Learning**: Feature storage, training data preparation
+- **IoT Systems**: Sensor data collection, device telemetry
+- **Security**: Audit trails, tamper-evident logging
+- **Gaming**: Player statistics, match analytics
+- **Finance**: Trading data, transaction logging
+- **Mobile Apps**: Offline data sync, local analytics
 
 ---
 
@@ -724,14 +724,14 @@ npm install
 #### Use Cases
 
 **Perfect for**:
-- 🌐 **Web Applications**: Express.js APIs, session storage, user analytics
-- 📊 **Real-time Analytics**: Live dashboards, event tracking, metrics collection
-- 🤖 **IoT Data Processing**: Sensor data ingestion, device telemetry
-- 🎮 **Gaming Backends**: Player statistics, match data, leaderboards
-- 🔒 **Security Logging**: Audit trails, access logs, intrusion detection
-- 💰 **FinTech Applications**: Transaction logging, trading data, compliance
-- 📱 **Mobile Backends**: User data sync, offline-first applications
-- 🚀 **Serverless Functions**: AWS Lambda, Vercel, Netlify edge functions
+- **Web Applications**: Express.js APIs, session storage, user analytics
+- **Real-time Analytics**: Live dashboards, event tracking, metrics collection
+- **IoT Data Processing**: Sensor data ingestion, device telemetry
+- **Gaming Backends**: Player statistics, match data, leaderboards
+- **Security Logging**: Audit trails, access logs, intrusion detection
+- **FinTech Applications**: Transaction logging, trading data, compliance
+- **Mobile Backends**: User data sync, offline-first applications
+- **Serverless Functions**: AWS Lambda, Vercel, Netlify edge functions
 
 ---
 
@@ -898,16 +898,16 @@ GOOS=linux GOARCH=amd64 go build example.go
 #### Use Cases
 
 **Perfect for**:
-- 🌐 **Web Services**: High-performance REST APIs, GraphQL backends
-- 🏗️ **Microservices**: Service mesh data, inter-service communication
-- 📊 **Analytics**: Real-time data processing, time-series analysis
-- 🤖 **ML/AI Systems**: Feature stores, training data pipelines
-- 🏭 **IoT Platforms**: Device telemetry, sensor data aggregation
-- 🔒 **Security Tools**: Log analysis, threat detection, audit systems
-- 🎮 **Game Backends**: Player stats, match data, leaderboards
-- 💰 **FinTech**: Transaction processing, trading systems, risk analysis
-- 🚀 **DevOps Tools**: Monitoring systems, CI/CD pipelines, metrics
-- 📱 **Mobile Backends**: User data sync, analytics, push notifications
+- **Web Services**: High-performance REST APIs, GraphQL backends
+- **Microservices**: Service mesh data, inter-service communication
+- **Analytics**: Real-time data processing, time-series analysis
+- **ML/AI Systems**: Feature stores, training data pipelines
+- **IoT Platforms**: Device telemetry, sensor data aggregation
+- **Security Tools**: Log analysis, threat detection, audit systems
+- **Game Backends**: Player stats, match data, leaderboards
+- **FinTech**: Transaction processing, trading systems, risk analysis
+- **DevOps Tools**: Monitoring systems, CI/CD pipelines, metrics
+- **Mobile Backends**: User data sync, analytics, push notifications
 
 ---
 
@@ -984,13 +984,13 @@ embed/ristretto.h      # C header for bindings
 
 | Requirement | Original API | Table V2 API |
 |-------------|--------------|--------------|
-| **SQL compatibility** | ✅ Full SQL parsing | ❌ Direct API only |
-| **Write performance** | ~1M rows/sec | ⚡ 4.6M rows/sec |
-| **Query flexibility** | ✅ SQL WHERE, etc. | ⚡ Table scan only |
-| **Memory usage** | Variable | ⚡ Fixed, predictable |
-| **Schema changes** | ✅ Dynamic | ❌ Fixed at creation |
-| **Transactions** | ❌ Not supported | ❌ Not supported |
-| **File format** | B+Tree pages | ⚡ Append-only |
+| **SQL compatibility** | YES: Full SQL parsing | NO: Direct API only |
+| **Write performance** | ~1M rows/sec | FAST: 4.6M rows/sec |
+| **Query flexibility** | YES: SQL WHERE, etc. | FAST: Table scan only |
+| **Memory usage** | Variable | FAST: Fixed, predictable |
+| **Schema changes** | YES: Dynamic | NO: Fixed at creation |
+| **Transactions** | NO: Not supported | NO: Not supported |
+| **File format** | B+Tree pages | FAST: Append-only |
 
 ### Use Case Guidelines
 

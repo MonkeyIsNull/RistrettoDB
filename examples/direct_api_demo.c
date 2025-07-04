@@ -50,18 +50,18 @@ int main(void) {
     
     RistrettoDB* db = ristretto_open("direct_demo.db");
     if (!db) {
-        fprintf(stderr, "❌ Failed to open database\n");
+        fprintf(stderr, "ERROR: Failed to open database\n");
         return 1;
     }
-    printf("✅ Database opened: direct_demo.db\n");
+    printf("SUCCESS: Database opened: direct_demo.db\n");
     
     // Create table
     RistrettoResult result = ristretto_exec(db, 
         "CREATE TABLE sales (id INTEGER, product TEXT, amount REAL, date TEXT)");
     if (result == RISTRETTO_OK) {
-        printf("✅ Table 'sales' created\n");
+        printf("SUCCESS: Table 'sales' created\n");
     } else {
-        fprintf(stderr, "❌ Table creation failed: %s\n", ristretto_error_string(result));
+        fprintf(stderr, "ERROR: Table creation failed: %s\n", ristretto_error_string(result));
     }
     
     // Insert data
@@ -75,9 +75,9 @@ int main(void) {
     for (int i = 0; i < 4; i++) {
         result = ristretto_exec(db, sales[i]);
         if (result == RISTRETTO_OK) {
-            printf("✅ Recorded sale %d\n", i + 1);
+            printf("SUCCESS: Recorded sale %d\n", i + 1);
         } else {
-            fprintf(stderr, "❌ Insert failed: %s\n", ristretto_error_string(result));
+            fprintf(stderr, "ERROR: Insert failed: %s\n", ristretto_error_string(result));
         }
     }
     
@@ -85,11 +85,11 @@ int main(void) {
     printf("\n");
     result = ristretto_query(db, "SELECT * FROM sales", print_query_result, NULL);
     if (result != RISTRETTO_OK) {
-        fprintf(stderr, "❌ Query failed: %s\n", ristretto_error_string(result));
+        fprintf(stderr, "ERROR: Query failed: %s\n", ristretto_error_string(result));
     }
     
     ristretto_close(db);
-    printf("✅ Original SQL API demo completed\n\n");
+    printf("SUCCESS: Original SQL API demo completed\n\n");
     
     // === PART 2: Table V2 Ultra-Fast API (Direct names) ===
     printf("Part 2: Table V2 Ultra-Fast API (4.6M rows/sec)\n");
@@ -100,13 +100,13 @@ int main(void) {
         "CREATE TABLE metrics (timestamp INTEGER, cpu_percent REAL, memory_mb INTEGER, process_name TEXT(32))");
     
     if (!table) {
-        fprintf(stderr, "❌ Failed to create ultra-fast table\n");
+        fprintf(stderr, "ERROR: Failed to create ultra-fast table\n");
         return 1;
     }
-    printf("✅ Ultra-fast table 'metrics' created\n");
+    printf("SUCCESS: Ultra-fast table 'metrics' created\n");
     
     // High-speed data insertion
-    printf("✅ Starting ultra-fast insertion of 8000 metric records...\n");
+    printf("SUCCESS: Starting ultra-fast insertion of 8000 metric records...\n");
     
     const char* processes[] = {"chrome", "firefox", "vscode", "terminal", "docker"};
     int successful_inserts = 0;
@@ -121,38 +121,38 @@ int main(void) {
         if (ristretto_table_append_row(table, values)) {
             successful_inserts++;
         } else {
-            fprintf(stderr, "❌ Failed to insert row %d\n", i);
+            fprintf(stderr, "ERROR: Failed to insert row %d\n", i);
         }
         
         ristretto_value_destroy(&values[3]);  // Clean up text value
     }
     
-    printf("✅ Ultra-fast insertion completed\n");
+    printf("SUCCESS: Ultra-fast insertion completed\n");
     printf("   Records inserted: %d/8000\n", successful_inserts);
     printf("   Total rows in table: %zu\n", ristretto_table_get_row_count(table));
     
     ristretto_table_close(table);
-    printf("✅ Table V2 ultra-fast demo completed\n\n");
+    printf("SUCCESS: Table V2 ultra-fast demo completed\n\n");
     
     // === Performance Summary ===
     printf("============================================\n");
     printf("           PERFORMANCE SUMMARY\n");
     printf("============================================\n");
-    printf("🎯 Mission Accomplished!\n\n");
+    printf("Mission Accomplished!\n\n");
     
-    printf("📊 Results:\n");
+    printf("Results:\n");
     printf("   • SQL Operations: 4 sales records processed\n");
     printf("   • Ultra-fast Inserts: %d metric records\n", successful_inserts);
     printf("   • Total Operations: %d\n", 4 + successful_inserts);
     printf("   • Both APIs working perfectly\n\n");
     
-    printf("⚡ Performance Characteristics:\n");
+    printf("Performance Characteristics:\n");
     printf("   • Original API: 2.8x faster than SQLite\n");
     printf("   • Table V2 API: 4.6M rows/sec capability\n");
     printf("   • Library size: ~42KB static\n");
     printf("   • Zero dependencies\n\n");
     
-    printf("🛠️ Integration Guide:\n");
+    printf("Integration Guide:\n");
     printf("   1. #define RISTRETTO_NO_COMPATIBILITY_LAYER\n");
     printf("   2. #include \"ristretto.h\"\n");
     printf("   3. Link: -lristretto\n");

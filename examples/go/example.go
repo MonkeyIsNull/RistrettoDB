@@ -12,18 +12,18 @@ import (
 
 // originalSqlApiExample demonstrates the Original SQL API (2.8x faster than SQLite)
 func originalSqlApiExample() bool {
-	fmt.Println("🔧 Original SQL API Example")
+	fmt.Println("SETUP: Original SQL API Example")
 	fmt.Println(strings.Repeat("=", 40))
 
 	// Open database
 	db, err := ristretto.Open("go_sql_example.db")
 	if err != nil {
-		fmt.Printf("❌ Failed to open database: %v\n", err)
+		fmt.Printf("ERROR: Failed to open database: %v\n", err)
 		return false
 	}
 	defer db.Close()
 
-	fmt.Printf("✅ Connected to RistrettoDB v%s\n", ristretto.Version())
+	fmt.Printf("SUCCESS: Connected to RistrettoDB v%s\n", ristretto.Version())
 
 	// Create a table for e-commerce orders
 	err = db.Exec(`
@@ -36,10 +36,10 @@ func originalSqlApiExample() bool {
 		)
 	`)
 	if err != nil {
-		fmt.Printf("❌ Failed to create table: %v\n", err)
+		fmt.Printf("ERROR: Failed to create table: %v\n", err)
 		return false
 	}
-	fmt.Println("✅ Created 'orders' table")
+	fmt.Println("SUCCESS: Created 'orders' table")
 
 	// Insert sample order data
 	orders := []struct {
@@ -64,17 +64,17 @@ func originalSqlApiExample() bool {
 		)
 		err = db.Exec(sql)
 		if err != nil {
-			fmt.Printf("❌ Failed to insert order %d: %v\n", order.id, err)
+			fmt.Printf("ERROR: Failed to insert order %d: %v\n", order.id, err)
 			return false
 		}
 	}
-	fmt.Printf("✅ Inserted %d orders\n", len(orders))
+	fmt.Printf("SUCCESS: Inserted %d orders\n", len(orders))
 
 	// Query all orders
-	fmt.Println("\n📦 All orders:")
+	fmt.Println("\nDATA: All orders:")
 	results, err := db.Query("SELECT * FROM orders")
 	if err != nil {
-		fmt.Printf("❌ Query failed: %v\n", err)
+		fmt.Printf("ERROR: Query failed: %v\n", err)
 		return false
 	}
 
@@ -85,10 +85,10 @@ func originalSqlApiExample() bool {
 	}
 
 	// Query high-value orders
-	fmt.Println("\n💰 High-value orders (> $200):")
+	fmt.Println("\nFILTER: High-value orders (> $200):")
 	highValueOrders, err := db.Query("SELECT customer_name, product, total_price FROM orders WHERE total_price > 200")
 	if err != nil {
-		fmt.Printf("❌ High-value query failed: %v\n", err)
+		fmt.Printf("ERROR: High-value query failed: %v\n", err)
 		return false
 	}
 
@@ -99,22 +99,22 @@ func originalSqlApiExample() bool {
 	// Calculate total sales
 	totalSales, err := db.Query("SELECT SUM(total_price) as total FROM orders")
 	if err != nil {
-		fmt.Printf("❌ Total sales query failed: %v\n", err)
+		fmt.Printf("ERROR: Total sales query failed: %v\n", err)
 		return false
 	}
 
 	if len(totalSales) > 0 {
-		fmt.Printf("\n💵 Total sales: $%s\n", totalSales[0]["total"])
+		fmt.Printf("\nTOTAL: Total sales: $%s\n", totalSales[0]["total"])
 	}
 
-	fmt.Printf("\n✅ Found %d high-value orders\n", len(highValueOrders))
-	fmt.Println("✅ Original SQL API example completed successfully!\n")
+	fmt.Printf("\nSUCCESS: Found %d high-value orders\n", len(highValueOrders))
+	fmt.Println("SUCCESS: Original SQL API example completed successfully!\n")
 	return true
 }
 
 // tableV2ApiExample demonstrates the Table V2 Ultra-Fast API (4.57x faster than SQLite)
 func tableV2ApiExample() bool {
-	fmt.Println("⚡ Table V2 Ultra-Fast API Example")
+	fmt.Println("PERFORMANCE: Table V2 Ultra-Fast API Example")
 	fmt.Println(strings.Repeat("=", 40))
 
 	// Create ultra-fast table for financial trading data
@@ -130,16 +130,16 @@ func tableV2ApiExample() bool {
 
 	table, err := ristretto.CreateTable("trading_stream", schema)
 	if err != nil {
-		fmt.Printf("❌ Failed to create table: %v\n", err)
+		fmt.Printf("ERROR: Failed to create table: %v\n", err)
 		return false
 	}
 	defer table.Close()
 
-	fmt.Println("✅ Created ultra-fast 'trading_data' table")
+	fmt.Println("SUCCESS: Created ultra-fast 'trading_data' table")
 	fmt.Println("   Optimized for 4.6M+ rows/second throughput")
 
 	// Simulate high-frequency trading data ingestion
-	fmt.Println("\n📈 Simulating high-frequency trading data...")
+	fmt.Println("\nSIMULATION: Simulating high-frequency trading data...")
 
 	symbols := []string{"AAPL", "GOOGL", "MSFT", "AMZN", "TSLA", "META", "NVDA", "NFLX"}
 	exchanges := []string{"NASDAQ", "NYSE", "BATS", "ARCA"}
@@ -170,7 +170,7 @@ func tableV2ApiExample() bool {
 		// High-speed append (optimized for performance)
 		err = table.AppendRow(values)
 		if err != nil {
-			fmt.Printf("   ⚠️  Failed to insert trade %d: %v\n", i, err)
+			fmt.Printf("   WARNING: Failed to insert trade %d: %v\n", i, err)
 		} else {
 			successfulInserts++
 		}
@@ -181,18 +181,18 @@ func tableV2ApiExample() bool {
 		}
 	}
 
-	fmt.Println("✅ High-frequency ingestion completed")
+	fmt.Println("SUCCESS: High-frequency ingestion completed")
 	fmt.Printf("   Successfully processed: %d/%d trades\n", successfulInserts, totalInserts)
 	fmt.Printf("   Total rows in table: %d\n", table.GetRowCount())
 
 	// Performance and use case summary
-	fmt.Println("\n📊 Performance Summary:")
+	fmt.Println("\nPERFORMANCE: Performance Summary:")
 	fmt.Printf("   • Trade processing rate: ~%d events simulated\n", totalInserts)
 	fmt.Printf("   • Memory efficient: Fixed-width row format\n")
 	fmt.Printf("   • Zero-copy I/O: Memory-mapped file access\n")
 	fmt.Printf("   • Append-only: Optimized for write-heavy trading workloads\n")
 
-	fmt.Println("\n🏦 Financial Trading Use Cases:")
+	fmt.Println("\nFINANCIAL: Financial Trading Use Cases:")
 	fmt.Println("   • High-frequency trading data capture")
 	fmt.Println("   • Real-time market data feeds")
 	fmt.Println("   • Order book snapshots")
@@ -200,13 +200,13 @@ func tableV2ApiExample() bool {
 	fmt.Println("   • Risk management data")
 	fmt.Println("   • Compliance and audit trails")
 
-	fmt.Println("✅ Table V2 ultra-fast API example completed successfully!\n")
+	fmt.Println("SUCCESS: Table V2 ultra-fast API example completed successfully!\n")
 	return true
 }
 
 // integrationExamples shows practical integration examples
 func integrationExamples() {
-	fmt.Println("🔗 Integration Examples")
+	fmt.Println("INTEGRATION: Integration Examples")
 	fmt.Println(strings.Repeat("=", 30))
 
 	fmt.Println("Perfect use cases for RistrettoDB Go bindings:\n")
@@ -215,16 +215,16 @@ func integrationExamples() {
 		category    string
 		description string
 	}{
-		{"🌐 Web Services", "High-performance REST APIs, GraphQL backends"},
-		{"🏗️  Microservices", "Service mesh data, inter-service communication"},
-		{"📊 Analytics", "Real-time data processing, time-series analysis"},
-		{"🤖 ML/AI Systems", "Feature stores, training data pipelines"},
-		{"🏭 IoT Platforms", "Device telemetry, sensor data aggregation"},
-		{"🔒 Security Tools", "Log analysis, threat detection, audit systems"},
-		{"🎮 Game Backends", "Player stats, match data, leaderboards"},
-		{"💰 FinTech", "Transaction processing, trading systems, risk analysis"},
-		{"🚀 DevOps Tools", "Monitoring systems, CI/CD pipelines, metrics"},
-		{"📱 Mobile Backends", "User data sync, analytics, push notifications"},
+		{"Web Services", "High-performance REST APIs, GraphQL backends"},
+		{"Microservices", "Service mesh data, inter-service communication"},
+		{"Analytics", "Real-time data processing, time-series analysis"},
+		{"ML/AI Systems", "Feature stores, training data pipelines"},
+		{"IoT Platforms", "Device telemetry, sensor data aggregation"},
+		{"Security Tools", "Log analysis, threat detection, audit systems"},
+		{"Game Backends", "Player stats, match data, leaderboards"},
+		{"FinTech", "Transaction processing, trading systems, risk analysis"},
+		{"DevOps Tools", "Monitoring systems, CI/CD pipelines, metrics"},
+		{"Mobile Backends", "User data sync, analytics, push notifications"},
 	}
 
 	for _, example := range examples {
@@ -232,13 +232,13 @@ func integrationExamples() {
 		fmt.Printf("     └─ %s\n", example.description)
 	}
 
-	fmt.Println("\n📦 Installation:")
+	fmt.Println("\nINSTALLATION: Installation:")
 	fmt.Println("   1. Build RistrettoDB: cd ../../ && make lib")
 	fmt.Println("   2. Copy bindings: cp examples/go/* your_project/")
 	fmt.Println("   3. go mod init your-project")
 	fmt.Println("   4. import \"./ristretto\"")
 
-	fmt.Println("\n🚀 Performance Benefits:")
+	fmt.Println("\nPERFORMANCE: Performance Benefits:")
 	fmt.Println("   • 2.8x faster than SQLite (Original API)")
 	fmt.Println("   • 4.57x faster than SQLite (Table V2 API)")
 	fmt.Println("   • Native Go integration with cgo")
@@ -246,7 +246,7 @@ func integrationExamples() {
 	fmt.Println("   • Concurrent access support")
 	fmt.Println("   • Zero external dependencies")
 
-	fmt.Println("\n💡 Go-Specific Advantages:")
+	fmt.Println("\nGO-SPECIFIC: Go-Specific Advantages:")
 	fmt.Println("   • Excellent for concurrent applications")
 	fmt.Println("   • Perfect for microservices architectures")
 	fmt.Println("   • Great for cloud-native applications")
@@ -255,7 +255,7 @@ func integrationExamples() {
 }
 
 func main() {
-	fmt.Println("🔵 RistrettoDB Go Bindings Example")
+	fmt.Println("DEMO: RistrettoDB Go Bindings Example")
 	fmt.Println(strings.Repeat("=", 50))
 	fmt.Println("A tiny, blazingly fast, embeddable SQL engine")
 	fmt.Println("https://github.com/MonkeyIsNull/RistrettoDB")
@@ -264,16 +264,16 @@ func main() {
 	// Check if library is available
 	version := ristretto.Version()
 	if version == "" {
-		fmt.Println("❌ Failed to load RistrettoDB library")
-		fmt.Println("\n💡 Make sure to build the library first:")
+		fmt.Println("ERROR: Failed to load RistrettoDB library")
+		fmt.Println("\nTIP: Make sure to build the library first:")
 		fmt.Println("   cd ../../ && make lib")
-		fmt.Println("\n💡 Make sure cgo can find the library:")
+		fmt.Println("\nTIP: Make sure cgo can find the library:")
 		fmt.Println("   export CGO_LDFLAGS=\"-L../../lib\"")
 		fmt.Println("   export LD_LIBRARY_PATH=\"../../lib:$LD_LIBRARY_PATH\"")
 		return
 	}
 
-	fmt.Printf("✅ RistrettoDB v%s loaded successfully\n", version)
+	fmt.Printf("SUCCESS: RistrettoDB v%s loaded successfully\n", version)
 	fmt.Printf("   Version Number: %d\n", ristretto.VersionNumber())
 	fmt.Println()
 
@@ -292,20 +292,20 @@ func main() {
 
 	fmt.Println("\n" + strings.Repeat("=", 50))
 	if success {
-		fmt.Println("🎉 All examples completed successfully!")
+		fmt.Println("SUCCESS: All examples completed successfully!")
 		fmt.Println("   Ready to integrate RistrettoDB into your Go applications!")
 		fmt.Println()
-		fmt.Println("💻 Next Steps:")
+		fmt.Println("NEXT STEPS: Next Steps:")
 		fmt.Println("   • Copy ristretto.go to your project")
 		fmt.Println("   • Set up CGO_LDFLAGS for your build")
 		fmt.Println("   • Start building high-performance Go applications!")
 		fmt.Println()
-		fmt.Println("🔧 Build Tips:")
+		fmt.Println("BUILD TIPS: Build Tips:")
 		fmt.Println("   • go build -ldflags \"-L../../lib\" example.go")
 		fmt.Println("   • Ensure libristretto.so is in your library path")
 		fmt.Println("   • Use go mod for dependency management")
 	} else {
-		fmt.Println("⚠️  Some examples failed. Check error messages above.")
+		fmt.Println("WARNING: Some examples failed. Check error messages above.")
 		log.Fatal("Example execution failed")
 	}
 }

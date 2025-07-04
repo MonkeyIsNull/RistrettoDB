@@ -99,7 +99,7 @@ int main(void) {
     
     table_close(table);
     
-    printf("\n✅ Embedding example completed successfully!\n");
+    printf("\nSUCCESS: Embedding example completed successfully!\n");
     printf("\nKey advantages of RistrettoDB:\n");
     printf("• Zero dependencies - just link the library\n");
     printf("• Small footprint - ~42KB static library\n");

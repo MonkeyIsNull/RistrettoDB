@@ -358,7 +358,7 @@ func main() {
     }
     defer table.Close()
     
-    fmt.Println("🌡️  Starting IoT data collection...")
+    fmt.Println("SENSORS: Starting IoT data collection...")
     
     locations := []string{"Kitchen", "Bedroom", "Garage", "Attic", "Basement"}
     
@@ -395,7 +395,7 @@ func main() {
         time.Sleep(10 * time.Millisecond)
     }
     
-    fmt.Printf("✅ Collection complete. Total readings: %d\n", table.GetRowCount())
+    fmt.Printf("SUCCESS: Collection complete. Total readings: %d\n", table.GetRowCount())
 }
 ```
 
@@ -513,11 +513,11 @@ func main() {
     sigChan := make(chan os.Signal, 1)
     signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
     
-    fmt.Println("📝 Event logging service started. Press Ctrl+C to stop.")
+    fmt.Println("SERVICE: Event logging service started. Press Ctrl+C to stop.")
     <-sigChan
     
-    fmt.Printf("📊 Total events logged: %d\n", logger.table.GetRowCount())
-    fmt.Println("🛑 Shutting down event logger...")
+    fmt.Printf("STATS: Total events logged: %d\n", logger.table.GetRowCount())
+    fmt.Println("SHUTDOWN: Shutting down event logger...")
 }
 ```
 

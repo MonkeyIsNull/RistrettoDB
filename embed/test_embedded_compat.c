@@ -11,18 +11,18 @@ int main(void) {
     printf("\n--- Testing Original SQL API ---\n");
     RistrettoDB* db = ristretto_open("embedded_compat_test.db");
     if (db) {
-        printf("✅ Database opened successfully\n");
+        printf("SUCCESS: Database opened successfully\n");
         
         RistrettoResult result = ristretto_exec(db, "CREATE TABLE test (id INTEGER, name TEXT)");
         if (result == RISTRETTO_OK) {
-            printf("✅ Table created successfully\n");
+            printf("SUCCESS: Table created successfully\n");
         } else {
-            printf("❌ Table creation failed: %s\n", ristretto_error_string(result));
+            printf("ERROR: Table creation failed: %s\n", ristretto_error_string(result));
         }
         
         ristretto_close(db);
     } else {
-        printf("❌ Failed to open database\n");
+        printf("ERROR: Failed to open database\n");
     }
     
     // Test Table V2 API
@@ -31,7 +31,7 @@ int main(void) {
         "CREATE TABLE v2_embedded_test (id INTEGER, value REAL, name TEXT(32))");
     
     if (table) {
-        printf("✅ V2 table created successfully\n");
+        printf("SUCCESS: V2 table created successfully\n");
         
         // Insert a test row
         RistrettoValue values[3];
@@ -40,18 +40,18 @@ int main(void) {
         values[2] = ristretto_value_text("embedded_test");
         
         if (ristretto_table_append_row(table, values)) {
-            printf("✅ Row inserted successfully\n");
+            printf("SUCCESS: Row inserted successfully\n");
             printf("Row count: %zu\n", ristretto_table_get_row_count(table));
         } else {
-            printf("❌ Row insertion failed\n");
+            printf("ERROR: Row insertion failed\n");
         }
         
         ristretto_value_destroy(&values[2]);
         ristretto_table_close(table);
     } else {
-        printf("❌ Failed to create V2 table\n");
+        printf("ERROR: Failed to create V2 table\n");
     }
     
-    printf("\n🎉 Embedded compatibility test completed!\n");
+    printf("\nEmbedded compatibility test completed!\n");
     return 0;
 }

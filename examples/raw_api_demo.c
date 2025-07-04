@@ -107,18 +107,18 @@ int main(void) {
     
     RistrettoDB* db = ristretto_open("raw_demo.db");
     if (!db) {
-        fprintf(stderr, "❌ Failed to open database\n");
+        fprintf(stderr, "ERROR: Failed to open database\n");
         return 1;
     }
-    printf("✅ Database opened successfully\n");
+    printf("SUCCESS: Database opened successfully\n");
     
     // Create table
     RistrettoResult result = ristretto_exec(db, 
         "CREATE TABLE transactions (id INTEGER, amount REAL, description TEXT)");
     if (result == RISTRETTO_OK) {
-        printf("✅ Table 'transactions' created\n");
+        printf("SUCCESS: Table 'transactions' created\n");
     } else {
-        fprintf(stderr, "❌ Table creation failed: %s\n", ristretto_error_string(result));
+        fprintf(stderr, "ERROR: Table creation failed: %s\n", ristretto_error_string(result));
     }
     
     // Insert test data
@@ -131,9 +131,9 @@ int main(void) {
     for (int i = 0; i < 3; i++) {
         result = ristretto_exec(db, transactions[i]);
         if (result == RISTRETTO_OK) {
-            printf("✅ Transaction %d recorded\n", i + 1);
+            printf("SUCCESS: Transaction %d recorded\n", i + 1);
         } else {
-            fprintf(stderr, "❌ Insert failed: %s\n", ristretto_error_string(result));
+            fprintf(stderr, "ERROR: Insert failed: %s\n", ristretto_error_string(result));
         }
     }
     
@@ -141,11 +141,11 @@ int main(void) {
     printf("\n");
     result = ristretto_query(db, "SELECT * FROM transactions", print_query_result, NULL);
     if (result != RISTRETTO_OK) {
-        fprintf(stderr, "❌ Query failed: %s\n", ristretto_error_string(result));
+        fprintf(stderr, "ERROR: Query failed: %s\n", ristretto_error_string(result));
     }
     
     ristretto_close(db);
-    printf("✅ Original SQL API test completed\n\n");
+    printf("SUCCESS: Original SQL API test completed\n\n");
     
     // === PART 2: Table V2 Ultra-Fast API ===
     printf("Part 2: Table V2 Ultra-Fast API Testing\n");
@@ -155,13 +155,13 @@ int main(void) {
         "CREATE TABLE events (event_id INTEGER, severity INTEGER, message TEXT(64))");
     
     if (!table) {
-        fprintf(stderr, "❌ Failed to create ultra-fast table\n");
+        fprintf(stderr, "ERROR: Failed to create ultra-fast table\n");
         return 1;
     }
-    printf("✅ Ultra-fast table 'events' created\n");
+    printf("SUCCESS: Ultra-fast table 'events' created\n");
     
     // High-speed event logging
-    printf("✅ Logging 3000 events at maximum speed...\n");
+    printf("SUCCESS: Logging 3000 events at maximum speed...\n");
     
     const char* event_types[] = {
         "INFO: System startup",
@@ -182,24 +182,24 @@ int main(void) {
         if (table_append_row(table, values)) {
             successful_inserts++;
         } else {
-            fprintf(stderr, "❌ Failed to log event %d\n", i);
+            fprintf(stderr, "ERROR: Failed to log event %d\n", i);
         }
         
         value_destroy(&values[2]);  // Clean up text value
     }
     
-    printf("✅ Event logging completed\n");
+    printf("SUCCESS: Event logging completed\n");
     printf("   Events logged: %d/3000\n", successful_inserts);
     printf("   Total events in table: %zu\n", table_get_row_count(table));
     
     table_close(table);
-    printf("✅ Table V2 test completed\n\n");
+    printf("SUCCESS: Table V2 test completed\n\n");
     
     // === Final Summary ===
     printf("==============================================\n");
     printf("             FINAL RESULTS\n");
     printf("==============================================\n");
-    printf("🎉 RistrettoDB Raw API Demo Successful!\n\n");
+    printf("RistrettoDB Raw API Demo Successful!\n\n");
     
     printf("📈 Performance Verification:\n");
     printf("   • SQL transactions: 3 records processed\n");
@@ -207,12 +207,12 @@ int main(void) {
     printf("   • Both APIs functioning correctly\n\n");
     
     printf("🔬 Technical Validation:\n");
-    printf("   • Original SQL API: ✅ Working\n");
-    printf("   • Table V2 Ultra-Fast API: ✅ Working\n");
-    printf("   • Function exports: ✅ Verified\n");
-    printf("   • Memory management: ✅ Clean\n\n");
+    printf("   • Original SQL API: Working\n");
+    printf("   • Table V2 Ultra-Fast API: Working\n");
+    printf("   • Function exports: Verified\n");
+    printf("   • Memory management: Clean\n\n");
     
-    printf("🚀 Production Readiness:\n");
+    printf("Production Readiness:\n");
     printf("   • Library builds successfully\n");
     printf("   • APIs respond correctly\n");
     printf("   • Performance targets met\n");
