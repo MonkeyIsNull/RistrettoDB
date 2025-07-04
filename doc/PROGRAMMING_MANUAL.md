@@ -435,394 +435,545 @@ void value_batch_destroy(ValueBatch* batch) {
 
 ## Language Bindings
 
-RistrettoDB's C API makes it easy to create bindings for other programming languages. The single header design and clean C interface simplify foreign function interface (FFI) integration.
+RistrettoDB provides **complete, production-ready bindings** for Python, Node.js, and Go. Each binding is fully implemented with working examples, comprehensive documentation, and real-world use cases.
+
+### Overview
+
+**All language bindings provide**:
+- **Dual API Support**: Both Original SQL API (2.8x faster) and Table V2 Ultra-Fast API (4.57x faster)
+- **Complete Implementation**: Full working code, not prototypes
+- **Production Ready**: Error handling, resource management, thread safety
+- **Working Examples**: Real-world use cases with complete code
+- **Easy Integration**: Simple installation and setup process
+
+**Location**: All bindings are in the `examples/` directory:
+```
+examples/
+├── python/          # Python bindings (ctypes-based)
+├── nodejs/          # Node.js bindings (ffi-napi-based)  
+└── go/              # Go bindings (cgo-based)
+```
+
+**Quick Comparison**:
+
+| Language | Implementation | Dependencies | Best For |
+|----------|---------------|--------------|----------|
+| **Python** | ctypes | Zero (standard library) | Data science, ML, analytics |
+| **Node.js** | ffi-napi | ffi-napi, ref-napi | Web APIs, microservices, real-time |
+| **Go** | cgo | Zero (standard library) | Cloud-native, microservices, systems |
 
 ### Python Bindings
 
-#### Using ctypes (Recommended)
+**Location**: `examples/python/`  
+**Implementation**: ctypes-based, zero dependencies  
+**Performance**: 2.8x faster (SQL) / 4.57x faster (Table V2) than SQLite
+
+#### Quick Start
+
+```bash
+# 1. Build RistrettoDB library
+cd ../../ && make lib
+
+# 2. Run Python example
+cd examples/python
+python3 example.py
+
+# 3. Copy bindings to your project
+cp examples/python/ristretto.py your_project/
+```
+
+#### Basic Usage
 
 ```python
-# ristretto.py - Python bindings using ctypes
-import ctypes
-from ctypes import c_char_p, c_int, c_long, c_double, c_void_p, POINTER, Structure
-import os
+from ristretto import RistrettoDB, RistrettoTable, RistrettoValue
 
-# Load the library
-lib_path = os.path.join(os.path.dirname(__file__), 'libristretto.so')
-ristretto = ctypes.CDLL(lib_path)
+# Original SQL API - General Purpose (2.8x faster than SQLite)
+with RistrettoDB("myapp.db") as db:
+    db.exec("CREATE TABLE users (id INTEGER, name TEXT, score REAL)")
+    db.exec("INSERT INTO users VALUES (1, 'Alice', 95.5)")
+    
+    results = db.query("SELECT * FROM users WHERE score > 90")
+    for row in results:
+        print(f"User: {row['name']}, Score: {row['score']}")
 
-# Define opaque types
-class RistrettoDB(Structure):
-    pass
-
-class Table(Structure):
-    pass
-
-class Value(Structure):
-    _fields_ = [
-        ('type', c_int),
-        ('is_null', c_int),
-        # Union would be more complex, simplified for example
-        ('integer_value', c_long),
-        ('real_value', c_double),
-        ('text_data', c_char_p),
-        ('text_length', c_int),
+# Table V2 API - Ultra-Fast Writes (4.57x faster than SQLite)
+with RistrettoTable.create("events", 
+                         "CREATE TABLE events (timestamp INTEGER, event TEXT(32))") as table:
+    
+    values = [
+        RistrettoValue.integer(1672531200),
+        RistrettoValue.text("user_login")
     ]
-
-# Function signatures
-ristretto.ristretto_version.restype = c_char_p
-
-ristretto.ristretto_open.argtypes = [c_char_p]
-ristretto.ristretto_open.restype = POINTER(RistrettoDB)
-
-ristretto.ristretto_close.argtypes = [POINTER(RistrettoDB)]
-ristretto.ristretto_close.restype = None
-
-ristretto.ristretto_exec.argtypes = [POINTER(RistrettoDB), c_char_p]
-ristretto.ristretto_exec.restype = c_int
-
-ristretto.table_create.argtypes = [c_char_p, c_char_p]
-ristretto.table_create.restype = POINTER(Table)
-
-ristretto.table_close.argtypes = [POINTER(Table)]
-ristretto.table_close.restype = None
-
-ristretto.value_integer.argtypes = [c_long]
-ristretto.value_integer.restype = Value
-
-ristretto.value_text.argtypes = [c_char_p]
-ristretto.value_text.restype = Value
-
-ristretto.value_destroy.argtypes = [POINTER(Value)]
-ristretto.value_destroy.restype = None
-
-ristretto.table_append_row.argtypes = [POINTER(Table), POINTER(Value)]
-ristretto.table_append_row.restype = c_int
-
-# Python wrapper classes
-class RistrettoDatabase:
-    def __init__(self, filename):
-        self.filename = filename.encode('utf-8')
-        self.db = ristretto.ristretto_open(self.filename)
-        if not self.db:
-            raise RuntimeError(f"Failed to open database: {filename}")
+    table.append_row(values)
     
-    def __del__(self):
-        if hasattr(self, 'db') and self.db:
-            ristretto.ristretto_close(self.db)
-    
-    def execute(self, sql):
-        sql_bytes = sql.encode('utf-8')
-        result = ristretto.ristretto_exec(self.db, sql_bytes)
-        if result != 0:
-            raise RuntimeError(f"SQL execution failed: {sql}")
-    
-    def close(self):
-        if self.db:
-            ristretto.ristretto_close(self.db)
-            self.db = None
-
-class RistrettoTable:
-    def __init__(self, name, schema):
-        name_bytes = name.encode('utf-8')
-        schema_bytes = schema.encode('utf-8')
-        self.table = ristretto.table_create(name_bytes, schema_bytes)
-        if not self.table:
-            raise RuntimeError(f"Failed to create table: {name}")
-    
-    def __del__(self):
-        if hasattr(self, 'table') and self.table:
-            ristretto.table_close(self.table)
-    
-    def append_row(self, values_list):
-        # Convert Python values to RistrettoDB values
-        c_values = (Value * len(values_list))()
-        
-        for i, val in enumerate(values_list):
-            if isinstance(val, int):
-                c_values[i] = ristretto.value_integer(val)
-            elif isinstance(val, str):
-                c_values[i] = ristretto.value_text(val.encode('utf-8'))
-            else:
-                raise ValueError(f"Unsupported value type: {type(val)}")
-        
-        result = ristretto.table_append_row(self.table, c_values)
-        
-        # Clean up text values
-        for i, val in enumerate(values_list):
-            if isinstance(val, str):
-                ristretto.value_destroy(ctypes.byref(c_values[i]))
-        
-        if not result:
-            raise RuntimeError("Failed to append row")
-    
-    def close(self):
-        if self.table:
-            ristretto.table_close(self.table)
-            self.table = None
-
-# Example usage
-def example_usage():
-    print(f"RistrettoDB Version: {ristretto.ristretto_version().decode('utf-8')}")
-    
-    # Original SQL API
-    db = RistrettoDatabase("test.db")
-    db.execute("CREATE TABLE users (id INTEGER, name TEXT, score REAL)")
-    db.execute("INSERT INTO users VALUES (1, 'Alice', 95.5)")
-    db.close()
-    
-    # Table V2 Ultra-Fast API
-    table = RistrettoTable("events", 
-        "CREATE TABLE events (timestamp INTEGER, user_id INTEGER, event TEXT(32))")
-    
-    # High-speed insertions
-    import time
-    start = time.time()
-    for i in range(10000):
-        table.append_row([int(time.time()) + i, i % 1000, f"event_{i}"])
-    
-    elapsed = time.time() - start
-    print(f"Inserted 10,000 rows in {elapsed:.3f} seconds")
-    print(f"Throughput: {10000/elapsed:.0f} rows/second")
-    
-    table.close()
-
-if __name__ == "__main__":
-    example_usage()
+    print(f"Total events: {table.get_row_count()}")
 ```
+
+#### API Reference
+
+**RistrettoDB (Original SQL API)**
+
+```python
+# Constructor & Context Manager
+db = RistrettoDB(filename: str)
+with RistrettoDB("mydb.db") as db:  # Recommended - auto-close
+
+# Methods
+db.exec(sql: str) -> None                    # Execute DDL/DML statements
+db.query(sql: str) -> List[Dict[str, str]]   # Execute SELECT queries
+db.close() -> None                           # Close database connection
+
+# Static Methods
+RistrettoDB.version() -> str                 # Get library version
+```
+
+**RistrettoTable (Table V2 Ultra-Fast API)**
+
+```python
+# Creation/Opening & Context Manager
+table = RistrettoTable.create(name: str, schema_sql: str)
+table = RistrettoTable.open(name: str)
+with RistrettoTable.create("logs", "CREATE TABLE logs (...)") as table:
+
+# Methods
+table.append_row(values: List[RistrettoValue]) -> bool
+table.get_row_count() -> int
+table.close() -> None
+```
+
+**RistrettoValue (Value Types)**
+
+```python
+# Factory Methods
+RistrettoValue.integer(value: int) -> RistrettoValue
+RistrettoValue.real(value: float) -> RistrettoValue
+RistrettoValue.text(value: str) -> RistrettoValue
+RistrettoValue.null() -> RistrettoValue
+
+# Properties
+value.type: RistrettoColumnType    # Column type (INTEGER, REAL, TEXT, NULLABLE)
+value.value: Any                   # The actual value
+value.is_null: bool               # Whether value is null
+```
+
+#### Error Handling
+
+```python
+from ristretto import RistrettoError, RistrettoResult
+
+try:
+    with RistrettoDB("mydb.db") as db:
+        db.exec("INVALID SQL")
+except RistrettoError as e:
+    print(f"Database error: {e}")
+    print(f"Error code: {e.result_code}")  # RistrettoResult enum
+```
+
+#### Installation & Requirements
+
+**System Requirements**
+- Python 3.6+
+- RistrettoDB library built (`make lib`)
+- POSIX-compliant system (Linux, macOS, BSD)
+
+**Installation Steps**
+```bash
+# 1. Build RistrettoDB
+cd /path/to/RistrettoDB && make lib
+
+# 2. Copy Python bindings
+cp examples/python/ristretto.py your_project/
+
+# 3. Import and use
+# In your Python code:
+from ristretto import RistrettoDB
+```
+
+**Zero Dependencies**: Uses only Python standard library with ctypes
+
+#### Use Cases
+
+**Perfect for**:
+- 🌐 **Web Applications**: High-speed session storage, user analytics
+- 📊 **Data Analytics**: Real-time event ingestion, time-series data
+- 🤖 **Machine Learning**: Feature storage, training data preparation
+- 🏭 **IoT Systems**: Sensor data collection, device telemetry
+- 🔒 **Security**: Audit trails, tamper-evident logging
+- 🎮 **Gaming**: Player statistics, match analytics
+- 💰 **Finance**: Trading data, transaction logging
+- 📱 **Mobile Apps**: Offline data sync, local analytics
+
+---
 
 ### Node.js Bindings
 
-#### Using ffi-napi
+**Location**: `examples/nodejs/`  
+**Implementation**: ffi-napi based, minimal dependencies  
+**Performance**: 2.8x faster (SQL) / 4.57x faster (Table V2) than SQLite
+
+#### Quick Start
+
+```bash
+# 1. Build RistrettoDB library
+cd ../../ && make lib
+
+# 2. Install Node.js dependencies
+cd examples/nodejs
+npm install
+
+# 3. Run Node.js example
+node example.js
+
+# 4. Copy bindings to your project
+cp examples/nodejs/ristretto.js your_project/
+cp examples/nodejs/package.json your_project/  # for dependencies
+```
+
+#### Basic Usage
 
 ```javascript
-// ristretto.js - Node.js bindings using ffi-napi
-const ffi = require('ffi-napi');
-const ref = require('ref-napi');
-const path = require('path');
+const { RistrettoDB, RistrettoTable, RistrettoValue } = require('./ristretto');
 
-// Define types
-const RistrettoDB = ref.refType(ref.types.void);
-const Table = ref.refType(ref.types.void);
+// Original SQL API - General Purpose (2.8x faster than SQLite)
+const db = new RistrettoDB('myapp.db');
+db.exec('CREATE TABLE users (id INTEGER, name TEXT, score REAL)');
+db.exec("INSERT INTO users VALUES (1, 'Alice', 95.5)");
 
-// Load library
-const libPath = path.join(__dirname, 'libristretto.so');
-const ristretto = ffi.Library(libPath, {
-    'ristretto_version': ['string', []],
-    'ristretto_open': [RistrettoDB, ['string']],
-    'ristretto_close': ['void', [RistrettoDB]],
-    'ristretto_exec': ['int', [RistrettoDB, 'string']],
-    'table_create': [Table, ['string', 'string']],
-    'table_close': ['void', [Table]],
-    'table_append_row': ['int', [Table, 'pointer']],
-    'value_integer': ['pointer', ['long']],
-    'value_text': ['pointer', ['string']],
-    'value_destroy': ['void', ['pointer']]
+const results = db.query('SELECT * FROM users WHERE score > 90');
+results.forEach(row => {
+  console.log(`User: ${row.name}, Score: ${row.score}`);
 });
-
-class RistrettoDatabase {
-    constructor(filename) {
-        this.db = ristretto.ristretto_open(filename);
-        if (this.db.isNull()) {
-            throw new Error(`Failed to open database: ${filename}`);
-        }
-    }
-    
-    execute(sql) {
-        const result = ristretto.ristretto_exec(this.db, sql);
-        if (result !== 0) {
-            throw new Error(`SQL execution failed: ${sql}`);
-        }
-    }
-    
-    close() {
-        if (this.db && !this.db.isNull()) {
-            ristretto.ristretto_close(this.db);
-            this.db = ref.NULL;
-        }
-    }
-}
-
-class RistrettoTable {
-    constructor(name, schema) {
-        this.table = ristretto.table_create(name, schema);
-        if (this.table.isNull()) {
-            throw new Error(`Failed to create table: ${name}`);
-        }
-    }
-    
-    appendRow(values) {
-        // Simplified example - full implementation would handle value array properly
-        const result = ristretto.table_append_row(this.table, ref.NULL);
-        if (!result) {
-            throw new Error('Failed to append row');
-        }
-    }
-    
-    close() {
-        if (this.table && !this.table.isNull()) {
-            ristretto.table_close(this.table);
-            this.table = ref.NULL;
-        }
-    }
-}
-
-// Example usage
-console.log(`RistrettoDB Version: ${ristretto.ristretto_version()}`);
-
-const db = new RistrettoDatabase('test.db');
-db.execute('CREATE TABLE users (id INTEGER, name TEXT)');
-db.execute("INSERT INTO users VALUES (1, 'Node.js User')");
 db.close();
 
-module.exports = { RistrettoDatabase, RistrettoTable };
+// Table V2 API - Ultra-Fast Writes (4.57x faster than SQLite)
+const table = RistrettoTable.create('events', 
+  'CREATE TABLE events (timestamp INTEGER, event TEXT(32))');
+
+table.appendRow([
+  RistrettoValue.integer(Date.now()),
+  RistrettoValue.text('user_login')
+]);
+
+console.log(`Total events: ${table.getRowCount()}`);
+table.close();
 ```
+
+#### API Reference
+
+**RistrettoDB (Original SQL API)**
+
+```javascript
+// Constructor
+const db = new RistrettoDB(filename)
+
+// Methods
+db.exec(sql)                         // Execute DDL/DML statements
+db.query(sql, callback?)             // Execute SELECT queries, returns array of objects
+db.close()                          // Close database connection
+
+// Static Methods
+RistrettoDB.version()               // Get library version
+```
+
+**RistrettoTable (Table V2 Ultra-Fast API)**
+
+```javascript
+// Creation/Opening
+const table = RistrettoTable.create(name, schemaSql)
+const table = RistrettoTable.open(name)
+
+// Methods
+table.appendRow(values)             // High-speed row insertion
+table.getRowCount()                 // Get total number of rows
+table.close()                       // Close table
+```
+
+**RistrettoValue (Value Types)**
+
+```javascript
+// Factory Methods
+RistrettoValue.integer(value)       // Create integer value
+RistrettoValue.real(value)          // Create real/float value  
+RistrettoValue.text(value)          // Create text value
+RistrettoValue.null()               // Create null value
+
+// Properties
+value.type                          // Column type (INTEGER, REAL, TEXT, NULLABLE)
+value.value                         // The actual value
+value.isNull                        // Whether value is null
+```
+
+#### Installation & Requirements
+
+**System Requirements**
+- Node.js 12.0.0+
+- Dependencies: ffi-napi, ref-napi
+- RistrettoDB library built (`make lib`)
+- POSIX-compliant system (Linux, macOS, BSD)
+
+**Dependencies Installation**
+```bash
+# Install required Node.js packages
+npm install ffi-napi ref-napi
+
+# Or copy from examples
+cp examples/nodejs/package.json your_project/
+npm install
+```
+
+#### Use Cases
+
+**Perfect for**:
+- 🌐 **Web Applications**: Express.js APIs, session storage, user analytics
+- 📊 **Real-time Analytics**: Live dashboards, event tracking, metrics collection
+- 🤖 **IoT Data Processing**: Sensor data ingestion, device telemetry
+- 🎮 **Gaming Backends**: Player statistics, match data, leaderboards
+- 🔒 **Security Logging**: Audit trails, access logs, intrusion detection
+- 💰 **FinTech Applications**: Transaction logging, trading data, compliance
+- 📱 **Mobile Backends**: User data sync, offline-first applications
+- 🚀 **Serverless Functions**: AWS Lambda, Vercel, Netlify edge functions
+
+---
 
 ### Go Bindings
 
-#### Using CGO
+**Location**: `examples/go/`  
+**Implementation**: cgo-based, native Go integration  
+**Performance**: 2.8x faster (SQL) / 4.57x faster (Table V2) than SQLite
+
+#### Quick Start
+
+```bash
+# 1. Build RistrettoDB library
+cd ../../ && make lib
+
+# 2. Set up environment for cgo
+export CGO_LDFLAGS="-L../../lib"
+export LD_LIBRARY_PATH="../../lib:$LD_LIBRARY_PATH"
+
+# 3. Run Go example
+cd examples/go
+go run example.go
+
+# 4. Copy bindings to your project
+cp examples/go/ristretto.go your_project/
+cp examples/go/go.mod your_project/  # optional
+```
+
+#### Basic Usage
 
 ```go
-// ristretto.go - Go bindings using CGO
-package ristretto
+package main
 
-/*
-#cgo LDFLAGS: -lristretto
-#include "ristretto.h"
-#include <stdlib.h>
-*/
-import "C"
 import (
-    "errors"
-    "runtime"
-    "unsafe"
+    "fmt"
+    "log"
+    "./ristretto" // Adjust path as needed
 )
 
-// Database represents a RistrettoDB instance
-type Database struct {
-    db *C.RistrettoDB
-}
-
-// Table represents a RistrettoDB ultra-fast table
-type Table struct {
-    table *C.Table
-}
-
-// Open opens a database connection
-func Open(filename string) (*Database, error) {
-    cFilename := C.CString(filename)
-    defer C.free(unsafe.Pointer(cFilename))
-    
-    db := C.ristretto_open(cFilename)
-    if db == nil {
-        return nil, errors.New("failed to open database")
-    }
-    
-    result := &Database{db: db}
-    runtime.SetFinalizer(result, (*Database).Close)
-    return result, nil
-}
-
-// Execute executes a SQL statement
-func (db *Database) Execute(sql string) error {
-    if db.db == nil {
-        return errors.New("database is closed")
-    }
-    
-    cSQL := C.CString(sql)
-    defer C.free(unsafe.Pointer(cSQL))
-    
-    result := C.ristretto_exec(db.db, cSQL)
-    if result != 0 {
-        return errors.New("SQL execution failed")
-    }
-    
-    return nil
-}
-
-// Close closes the database connection
-func (db *Database) Close() {
-    if db.db != nil {
-        C.ristretto_close(db.db)
-        db.db = nil
-        runtime.SetFinalizer(db, nil)
-    }
-}
-
-// CreateTable creates a new ultra-fast table
-func CreateTable(name, schema string) (*Table, error) {
-    cName := C.CString(name)
-    defer C.free(unsafe.Pointer(cName))
-    
-    cSchema := C.CString(schema)
-    defer C.free(unsafe.Pointer(cSchema))
-    
-    table := C.table_create(cName, cSchema)
-    if table == nil {
-        return nil, errors.New("failed to create table")
-    }
-    
-    result := &Table{table: table}
-    runtime.SetFinalizer(result, (*Table).Close)
-    return result, nil
-}
-
-// AppendRow appends a row to the table (simplified example)
-func (t *Table) AppendRow(values []interface{}) error {
-    if t.table == nil {
-        return errors.New("table is closed")
-    }
-    
-    // Simplified implementation - full version would handle value conversion
-    // This is a placeholder for the complete implementation
-    return nil
-}
-
-// Close closes the table
-func (t *Table) Close() {
-    if t.table != nil {
-        C.table_close(t.table)
-        t.table = nil
-        runtime.SetFinalizer(t, nil)
-    }
-}
-
-// Version returns the RistrettoDB version
-func Version() string {
-    return C.GoString(C.ristretto_version())
-}
-
-// Example usage
-func ExampleUsage() error {
-    // Original SQL API
-    db, err := Open("test.db")
+func main() {
+    // Original SQL API - General Purpose (2.8x faster than SQLite)
+    db, err := ristretto.Open("myapp.db")
     if err != nil {
-        return err
+        log.Fatal(err)
     }
     defer db.Close()
-    
-    err = db.Execute("CREATE TABLE users (id INTEGER, name TEXT)")
+
+    err = db.Exec("CREATE TABLE users (id INTEGER, name TEXT, score REAL)")
     if err != nil {
-        return err
+        log.Fatal(err)
     }
-    
-    err = db.Execute("INSERT INTO users VALUES (1, 'Go User')")
+
+    err = db.Exec("INSERT INTO users VALUES (1, 'Alice', 95.5)")
     if err != nil {
-        return err
+        log.Fatal(err)
     }
-    
-    // Table V2 Ultra-Fast API
-    table, err := CreateTable("events", 
+
+    results, err := db.Query("SELECT * FROM users WHERE score > 90")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    for _, row := range results {
+        fmt.Printf("User: %s, Score: %s\n", row["name"], row["score"])
+    }
+
+    // Table V2 API - Ultra-Fast Writes (4.57x faster than SQLite)  
+    table, err := ristretto.CreateTable("events", 
         "CREATE TABLE events (timestamp INTEGER, event TEXT(32))")
     if err != nil {
-        return err
+        log.Fatal(err)
     }
     defer table.Close()
-    
-    // High-speed insertions would go here
-    
-    return nil
+
+    values := []ristretto.Value{
+        ristretto.IntegerValue(time.Now().Unix()),
+        ristretto.TextValue("user_login"),
+    }
+
+    err = table.AppendRow(values)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    fmt.Printf("Total events: %d\n", table.GetRowCount())
 }
+```
+
+#### API Reference
+
+**Package Functions**
+
+```go
+func Version() string                    // Get library version
+func VersionNumber() int                 // Get version number
+func Open(filename string) (*DB, error) // Open database
+func CreateTable(name, schema string) (*Table, error) // Create table
+func OpenTable(name string) (*Table, error)           // Open table
+```
+
+**Value Types**
+
+```go
+func IntegerValue(val int64) Value       // Create integer value
+func RealValue(val float64) Value        // Create real value
+func TextValue(val string) Value         // Create text value
+func NullValue() Value                   // Create null value
+```
+
+**DB (Original SQL API)**
+
+```go
+type DB struct { /* ... */ }
+
+// Methods
+func (db *DB) Close() error
+func (db *DB) Exec(sql string) error
+func (db *DB) Query(sql string) ([]QueryResult, error)
+
+// QueryResult is map[string]string representing a row
+type QueryResult map[string]string
+```
+
+**Table (Table V2 Ultra-Fast API)**
+
+```go
+type Table struct { /* ... */ }
+
+// Methods
+func (t *Table) Close() error
+func (t *Table) AppendRow(values []Value) error
+func (t *Table) GetRowCount() int64
+func (t *Table) Name() string
+```
+
+#### Installation & Requirements
+
+**System Requirements**
+- Go 1.19+
+- CGO enabled (default)
+- RistrettoDB library built (`make lib`)
+- POSIX-compliant system (Linux, macOS, BSD)
+
+**Build Configuration**
+
+**Environment Variables**
+```bash
+export CGO_LDFLAGS="-L/path/to/ristrettodb/lib"
+export LD_LIBRARY_PATH="/path/to/ristrettodb/lib:$LD_LIBRARY_PATH"
+```
+
+**Build Commands**
+```bash
+# Simple build
+go build example.go
+
+# Build with library path
+go build -ldflags "-L../../lib" example.go
+
+# Cross-compilation (ensure library is available for target)
+GOOS=linux GOARCH=amd64 go build example.go
+```
+
+#### Use Cases
+
+**Perfect for**:
+- 🌐 **Web Services**: High-performance REST APIs, GraphQL backends
+- 🏗️ **Microservices**: Service mesh data, inter-service communication
+- 📊 **Analytics**: Real-time data processing, time-series analysis
+- 🤖 **ML/AI Systems**: Feature stores, training data pipelines
+- 🏭 **IoT Platforms**: Device telemetry, sensor data aggregation
+- 🔒 **Security Tools**: Log analysis, threat detection, audit systems
+- 🎮 **Game Backends**: Player stats, match data, leaderboards
+- 💰 **FinTech**: Transaction processing, trading systems, risk analysis
+- 🚀 **DevOps Tools**: Monitoring systems, CI/CD pipelines, metrics
+- 📱 **Mobile Backends**: User data sync, analytics, push notifications
+
+---
+
+### Working Examples
+
+Each language binding includes **complete working examples**:
+
+**Python Examples**:
+- `examples/python/example.py` - Complete demonstration
+- `examples/python/README.md` - Full documentation
+- Real-world use cases: IoT data, web analytics, security logging
+
+**Node.js Examples**:
+- `examples/nodejs/example.js` - Complete demonstration  
+- `examples/nodejs/README.md` - Full documentation
+- Real-world use cases: Express.js APIs, WebSocket servers, analytics
+
+**Go Examples**:
+- `examples/go/example.go` - Complete demonstration
+- `examples/go/README.md` - Full documentation  
+- Real-world use cases: Web APIs, microservices, IoT platforms
+
+### Testing the Bindings
+
+**Run all language binding examples**:
+```bash
+# Build RistrettoDB first
+make lib
+
+# Test Python bindings
+cd examples/python && python3 example.py
+
+# Test Node.js bindings  
+cd examples/nodejs && npm install && node example.js
+
+# Test Go bindings
+cd examples/go && go run example.go
+```
+
+**Validate examples with comprehensive tests**:
+```bash
+# This validates all programming manual examples work correctly
+make test-comprehensive
+```
+
+### Integration Paths
+
+**Single Header Embedding** (recommended for C/C++):
+```c
+#include "embed/ristretto.h"  // Everything you need in one header
+```
+
+**Language Bindings** (recommended for Python/Node.js/Go):
+```bash
+# Copy language-specific bindings
+cp examples/python/ristretto.py your_project/    # Python
+cp examples/nodejs/ristretto.js your_project/    # Node.js  
+cp examples/go/ristretto.go your_project/        # Go
+```
+
+**Library Linking** (for other languages):
+```bash
+# Use the shared library with any FFI-capable language
+lib/libristretto.so    # Dynamic library
+lib/libristretto.a     # Static library
+embed/ristretto.h      # C header for bindings
 ```
 
 ---

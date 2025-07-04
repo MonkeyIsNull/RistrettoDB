@@ -1,0 +1,43 @@
+{
+  "name": "ristrettodb-nodejs-bindings",
+  "version": "2.0.0",
+  "description": "Node.js bindings for RistrettoDB - A tiny, blazingly fast, embeddable SQL engine",
+  "main": "ristretto.js",
+  "scripts": {
+    "test": "node example.js",
+    "install": "npm install ffi-napi ref-napi",
+    "example": "node example.js"
+  },
+  "dependencies": {
+    "ffi-napi": "^4.0.3",
+    "ref-napi": "^3.0.3"
+  },
+  "keywords": [
+    "database",
+    "sql",
+    "embedded",
+    "performance",
+    "ristrettodb",
+    "sqlite",
+    "fast"
+  ],
+  "author": "RistrettoDB Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MonkeyIsNull/RistrettoDB.git",
+    "directory": "examples/nodejs"
+  },
+  "homepage": "https://github.com/MonkeyIsNull/RistrettoDB",
+  "engines": {
+    "node": ">=12.0.0"
+  },
+  "files": [
+    "ristretto.js",
+    "example.js",
+    "README.md"
+  ],
+  "devDependencies": {},
+  "optionalDependencies": {},
+  "peerDependencies": {}
+}

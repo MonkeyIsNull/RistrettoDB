@@ -100,42 +100,87 @@ make embedded && ls -la embed/
 
 **Python Integration:**
 ```python
-import ctypes
-ristretto = ctypes.CDLL('./libristretto.so')
-# See examples/python/ for complete bindings
+from ristretto import RistrettoDB, RistrettoTable, RistrettoValue
+
+# Original SQL API (2.8x faster than SQLite)
+with RistrettoDB("myapp.db") as db:
+    db.exec("CREATE TABLE users (id INTEGER, name TEXT)")
+    results = db.query("SELECT * FROM users")
+    
+# Table V2 API (4.57x faster than SQLite)
+with RistrettoTable.create("events", "CREATE TABLE events (id INTEGER)") as table:
+    table.append_row([RistrettoValue.integer(1)])
+
+# See examples/python/ for complete bindings and examples
 ```
 
 **Node.js Integration:**
 ```javascript
-const ffi = require('ffi-napi');
-const ristretto = ffi.Library('./libristretto.so', { /* API definitions */ });
-// See examples/nodejs/ for complete bindings
+const { RistrettoDB, RistrettoTable, RistrettoValue } = require('./ristretto');
+
+// Original SQL API (2.8x faster than SQLite)
+const db = new RistrettoDB('myapp.db');
+db.exec('CREATE TABLE users (id INTEGER, name TEXT)');
+const results = db.query('SELECT * FROM users');
+db.close();
+
+// Table V2 API (4.57x faster than SQLite)
+const table = RistrettoTable.create('events', 'CREATE TABLE events (id INTEGER)');
+table.appendRow([RistrettoValue.integer(1)]);
+table.close();
+
+// See examples/nodejs/ for complete bindings and examples
 ```
 
 **Go Integration:**
 ```go
-/*
-#cgo LDFLAGS: -lristretto
-#include "ristretto.h"
-*/
-import "C"
-// See examples/go/ for complete bindings
+import "./ristretto"
+
+// Original SQL API (2.8x faster than SQLite)
+db, err := ristretto.Open("myapp.db")
+if err != nil { log.Fatal(err) }
+defer db.Close()
+
+err = db.Exec("CREATE TABLE users (id INTEGER, name TEXT)")
+results, err := db.Query("SELECT * FROM users")
+
+// Table V2 API (4.57x faster than SQLite)  
+table, err := ristretto.CreateTable("events", "CREATE TABLE events (id INTEGER)")
+defer table.Close()
+
+values := []ristretto.Value{ristretto.IntegerValue(1)}
+err = table.AppendRow(values)
+
+// See examples/go/ for complete bindings and examples
 ```
 
 ### Real-World Examples
 
 Our [examples/](examples/) directory contains working demonstrations:
 
+**C/C++ Examples:**
 - [`embedding_demo.c`](examples/embedding_demo.c) - Complete embedding guide
 - [`working_demo.c`](examples/working_demo.c) - Production-ready patterns  
 - [`raw_api_demo.c`](examples/raw_api_demo.c) - Direct API usage
 - [`direct_api_demo.c`](examples/direct_api_demo.c) - High-performance setup
 
+**Language Bindings:**
+- [`python/`](examples/python/) - Complete Python bindings (ctypes-based)
+- [`nodejs/`](examples/nodejs/) - Complete Node.js bindings (ffi-napi-based)
+- [`go/`](examples/go/) - Complete Go bindings (cgo-based)
+
 **Run the examples:**
 ```bash
 make lib                    # Build libraries first
-make examples              # Build all examples
+
+# C/C++ Examples
+make examples              # Build all C examples
 ./examples/embedding_demo  # See complete demonstration
+
+# Language Binding Examples
+cd examples/python && python3 example.py     # Python demo
+cd examples/nodejs && npm install && node example.js  # Node.js demo  
+cd examples/go && go run example.go          # Go demo (requires CGO setup)
 ```
 
 ### Production Deployment
