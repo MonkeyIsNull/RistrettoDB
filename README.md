@@ -9,7 +9,7 @@ A tiny, blazingly fast, **embeddable** SQL engine in C that delivers **4.57x per
 
 ```bash
 # 1. Clone and build the library
-git clone <repository-url> && cd RistrettoDB
+git clone https://github.com/MonkeyIsNull/RistrettoDB && cd RistrettoDB
 make lib
 
 # 2. Copy the header and link the library
@@ -29,7 +29,7 @@ int main() {
     ristretto_exec(db, "INSERT INTO test VALUES (1, 'Hello World')");
     ristretto_close(db);
     
-    printf("✅ Successfully embedded RistrettoDB!\n");
+    printf("Successfully embedded RistrettoDB!\n");
     return 0;
 }
 EOF
