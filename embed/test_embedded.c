@@ -2,12 +2,12 @@
 #include <stdio.h>
 
 int main(void) {
-    printf("Testing RistrettoDB Amalgamation\n");
+    printf("Testing RistrettoDB Embedded\n");
     printf("Version: %s\n", ristretto_version());
     
     // Test Original SQL API
     printf("\n--- Testing Original SQL API ---\n");
-    RistrettoDB* db = ristretto_open("amalgamation_test.db");
+    RistrettoDB* db = ristretto_open("embedded_test.db");
     if (db) {
         printf("✅ Database opened successfully\n");
         
@@ -50,6 +50,6 @@ int main(void) {
         printf("❌ Failed to create V2 table\n");
     }
     
-    printf("\n🎉 Amalgamation test completed!\n");
+    printf("\n🎉 Embedded test completed!\n");
     return 0;
 }

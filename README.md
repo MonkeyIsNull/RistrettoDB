@@ -90,9 +90,9 @@ make lib && ls -la lib/
 # libristretto.a     42KB    # Tiny static library
 # libristretto.so    56KB    # Dynamic library 
 
-# Amalgamation (single-file distribution)
-make amalgamation && ls -la embed/
-# ristretto.c        # All code in one file (amalgamation)
+# Embedded (single-file distribution)
+make embedded && ls -la embed/
+# ristretto.c        # All code in one file (embedded)
 # ristretto.h        # Single header (15KB)
 ```
 
@@ -328,7 +328,7 @@ make debug                  # CLI with debug symbols
 make lib-debug             # Libraries with debug symbols
 
 # Distribution builds
-make amalgamation          # Single-file distribution in dist/
+make embedded          # Single-file distribution in dist/
 
 # Testing
 make test                  # Basic functionality tests
@@ -350,7 +350,7 @@ make format             # Format code
 lib/libristretto.a         # Static library (42KB) - recommended for embedding
 lib/libristretto.so        # Dynamic library (56KB)
 embed/ristretto.h          # Single public header (15KB)
-embed/ristretto.c          # Amalgamation (single-file distribution)
+embed/ristretto.c          # Embedded (single-file distribution)
 bin/ristretto              # CLI tool
 examples/                  # Working embedding examples
 ```
@@ -622,8 +622,8 @@ RistrettoDB/
 │   └── ...        # Other headers
 ├── embed/         # Embedding files
 │   ├── ristretto.h # Single public header (15KB)
-│   ├── ristretto.c # Amalgamation (single-file distribution)
-│   └── test_*.c   # Amalgamation test files
+│   ├── ristretto.c # Embedded (single-file distribution)
+│   └── test_*.c   # Embedded test files
 ├── tests/         # Test suite
 ├── benchmark/     # Performance benchmarks
 ├── examples/      # Working embedding examples

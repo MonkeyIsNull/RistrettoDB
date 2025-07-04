@@ -1,15 +1,15 @@
 #include <stdio.h>
 
-#define RISTRETTO_AMALGAMATION
+#define RISTRETTO_EMBEDDED
 #include "ristretto.c"
 
 int main(void) {
-    printf("Testing RistrettoDB Amalgamation (Embedded Mode)\n");
+    printf("Testing RistrettoDB Embedded (Embedded Mode)\n");
     printf("Version: %s\n", ristretto_version());
     
     // Test Original SQL API
     printf("\n--- Testing Original SQL API ---\n");
-    RistrettoDB* db = ristretto_open("amalgamation_embedded_test.db");
+    RistrettoDB* db = ristretto_open("embedded_compat_test.db");
     if (db) {
         printf("✅ Database opened successfully\n");
         
@@ -52,6 +52,6 @@ int main(void) {
         printf("❌ Failed to create V2 table\n");
     }
     
-    printf("\n🎉 Embedded amalgamation test completed!\n");
+    printf("\n🎉 Embedded compatibility test completed!\n");
     return 0;
 }
