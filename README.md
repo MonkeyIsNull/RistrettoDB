@@ -411,7 +411,7 @@ The manual includes:
 - Performance optimization techniques
 - Best practices and troubleshooting
 
-> 📋 **Testing**: Run `make test-comprehensive` to validate all programming manual examples and performance claims work correctly on your system.
+> **Testing**: Run `make test-comprehensive` to validate all programming manual examples and performance claims work correctly on your system.
 
 ## Usage Examples
 

@@ -620,13 +620,13 @@ int main(void) {
     printf("  Failed: %d\n", tests_failed);
     
     if (tests_failed == 0) {
-        printf("\n🎉 ALL TESTS PASSED!\n");
-        printf("✅ All programming manual claims validated\n");
-        printf("✅ Real-world scenarios working\n");
-        printf("✅ Error handling robust\n");
-        printf("✅ Performance claims verified\n");
+        printf("\nSUCCESS: ALL TESTS PASSED!\n");
+        printf("SUCCESS: All programming manual claims validated\n");
+        printf("SUCCESS: Real-world scenarios working\n");
+        printf("SUCCESS: Error handling robust\n");
+        printf("SUCCESS: Performance claims verified\n");
     } else {
-        printf("\n❌ %d TESTS FAILED\n", tests_failed);
+        printf("\nERROR: %d TESTS FAILED\n", tests_failed);
         printf("Some programming manual claims need attention\n");
     }
     

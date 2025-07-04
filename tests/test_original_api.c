@@ -416,14 +416,14 @@ int main(void) {
     printf("  Failed: %d\n", tests_failed);
     
     if (tests_failed == 0) {
-        printf("\n🎉 ALL ORIGINAL API TESTS PASSED!\n");
-        printf("✅ SQL parsing working correctly\n");
-        printf("✅ CRUD operations functional\n");
-        printf("✅ Error handling robust\n");
-        printf("✅ Multiple tables supported\n");
-        printf("✅ Data persistence working\n");
+        printf("\nSUCCESS: ALL ORIGINAL API TESTS PASSED!\n");
+        printf("SUCCESS: SQL parsing working correctly\n");
+        printf("SUCCESS: CRUD operations functional\n");
+        printf("SUCCESS: Error handling robust\n");
+        printf("SUCCESS: Multiple tables supported\n");
+        printf("SUCCESS: Data persistence working\n");
     } else {
-        printf("\n❌ %d ORIGINAL API TESTS FAILED\n", tests_failed);
+        printf("\nERROR: %d ORIGINAL API TESTS FAILED\n", tests_failed);
     }
     
     cleanup_test_files();

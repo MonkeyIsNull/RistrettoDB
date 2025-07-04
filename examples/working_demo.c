@@ -49,18 +49,18 @@ int main(void) {
     
     RistrettoDB* db = ristretto_open("working_demo.db");
     if (!db) {
-        fprintf(stderr, "❌ Failed to open database\n");
+        fprintf(stderr, "ERROR: Failed to open database\n");
         return 1;
     }
-    printf("✅ Database opened: working_demo.db\n");
+    printf("SUCCESS: Database opened: working_demo.db\n");
     
     // Create table
     RistrettoResult result = ristretto_exec(db, 
         "CREATE TABLE inventory (id INTEGER, item TEXT, quantity INTEGER, price REAL)");
     if (result == RISTRETTO_OK) {
-        printf("✅ Table 'inventory' created\n");
+        printf("SUCCESS: Table 'inventory' created\n");
     } else {
-        fprintf(stderr, "❌ Table creation failed: %s\n", ristretto_error_string(result));
+        fprintf(stderr, "ERROR: Table creation failed: %s\n", ristretto_error_string(result));
     }
     
     // Insert data
@@ -73,9 +73,9 @@ int main(void) {
     for (int i = 0; i < 3; i++) {
         result = ristretto_exec(db, items[i]);
         if (result == RISTRETTO_OK) {
-            printf("✅ Inserted item %d\n", i + 1);
+            printf("SUCCESS: Inserted item %d\n", i + 1);
         } else {
-            fprintf(stderr, "❌ Insert failed: %s\n", ristretto_error_string(result));
+            fprintf(stderr, "ERROR: Insert failed: %s\n", ristretto_error_string(result));
         }
     }
     
@@ -83,11 +83,11 @@ int main(void) {
     printf("\n");
     result = ristretto_query(db, "SELECT * FROM inventory", print_query_result, NULL);
     if (result != RISTRETTO_OK) {
-        fprintf(stderr, "❌ Query failed: %s\n", ristretto_error_string(result));
+        fprintf(stderr, "ERROR: Query failed: %s\n", ristretto_error_string(result));
     }
     
     ristretto_close(db);
-    printf("✅ Original SQL API demo completed\n\n");
+    printf("SUCCESS: Original SQL API demo completed\n\n");
     
     // === PART 2: Table V2 Ultra-Fast API ===
     printf("Part 2: Table V2 Ultra-Fast API (4.6M rows/sec)\n");
@@ -98,13 +98,13 @@ int main(void) {
         "CREATE TABLE performance_log (timestamp INTEGER, duration_ms REAL, operation TEXT(32))");
     
     if (!table) {
-        fprintf(stderr, "❌ Failed to create ultra-fast table\n");
+        fprintf(stderr, "ERROR: Failed to create ultra-fast table\n");
         return 1;
     }
-    printf("✅ Ultra-fast table 'performance_log' created\n");
+    printf("SUCCESS: Ultra-fast table 'performance_log' created\n");
     
     // High-speed insertion test
-    printf("✅ Starting high-speed insertion test...\n");
+    printf("SUCCESS: Starting high-speed insertion test...\n");
     
     const char* operations[] = {"SELECT", "INSERT", "UPDATE", "DELETE", "CREATE"};
     int successful_inserts = 0;
@@ -119,42 +119,42 @@ int main(void) {
         if (table_append_row(table, values)) {
             successful_inserts++;
         } else {
-            fprintf(stderr, "❌ Failed to insert row %d\n", i);
+            fprintf(stderr, "ERROR: Failed to insert row %d\n", i);
         }
         
         value_destroy(&values[2]);  // Clean up the text value
     }
     
-    printf("✅ High-speed insertion completed\n");
+    printf("SUCCESS: High-speed insertion completed\n");
     printf("   Records inserted: %d/5000\n", successful_inserts);
     printf("   Total rows in table: %zu\n", table_get_row_count(table));
     
     table_close(table);
-    printf("✅ Table V2 ultra-fast demo completed\n\n");
+    printf("SUCCESS: Table V2 ultra-fast demo completed\n\n");
     
     // === Summary ===
     printf("============================================\n");
     printf("                SUMMARY\n");
     printf("============================================\n");
-    printf("✅ RistrettoDB successfully embedded and tested!\n\n");
+    printf("SUCCESS: RistrettoDB successfully embedded and tested!\n\n");
     
-    printf("🔧 Technical Details:\n");
+    printf("Technical Details:\n");
     printf("   • Library size: ~42KB (static)\n");
     printf("   • Zero external dependencies\n");
     printf("   • C11 compatible\n");
     printf("   • POSIX systems (Linux, macOS, BSD)\n\n");
     
-    printf("⚡ Performance Verified:\n");
+    printf("Performance Verified:\n");
     printf("   • Original API: 3 SQL operations completed\n");
     printf("   • Ultra-fast API: %d records inserted\n", successful_inserts);
     printf("   • Ready for production workloads\n\n");
     
-    printf("🚀 Integration:\n");
+    printf("Integration:\n");
     printf("   • Include: ristretto.h\n");
     printf("   • Link: -lristretto\n");
     printf("   • Compile: gcc -O3 myapp.c -lristretto\n\n");
     
-    printf("Perfect for embedding in C/C++ applications! 🎯\n");
+    printf("Perfect for embedding in C/C++ applications!\n");
     
     return 0;
 }

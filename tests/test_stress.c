@@ -422,14 +422,14 @@ int main(void) {
     printf("  Failed: %d\n", tests_failed);
     
     if (tests_failed == 0) {
-        printf("\n🎉 ALL STRESS TESTS PASSED!\n");
-        printf("✅ Handles 1M+ row datasets\n");
-        printf("✅ Memory management under pressure\n");
-        printf("✅ File growth works correctly\n");
-        printf("✅ Performance maintained under load\n");
-        printf("✅ Maximum schema limits supported\n");
+        printf("\nSUCCESS: ALL STRESS TESTS PASSED!\n");
+        printf("SUCCESS: Handles 1M+ row datasets\n");
+        printf("SUCCESS: Memory management under pressure\n");
+        printf("SUCCESS: File growth works correctly\n");
+        printf("SUCCESS: Performance maintained under load\n");
+        printf("SUCCESS: Maximum schema limits supported\n");
     } else {
-        printf("\n❌ %d STRESS TESTS FAILED\n", tests_failed);
+        printf("\nERROR: %d STRESS TESTS FAILED\n", tests_failed);
         printf("Some performance claims may not hold under extreme load\n");
     }
     

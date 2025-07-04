@@ -338,11 +338,11 @@ def demo():
     
     try:
         with RistrettoDB("python_demo.db") as db:
-            print("✅ Database opened successfully")
+            print("SUCCESS: Database opened successfully")
             
             # Create table
             db.exec("CREATE TABLE inventory (id INTEGER, item TEXT, price REAL)")
-            print("✅ Table created")
+            print("SUCCESS: Table created")
             
             # Insert data
             items = [
@@ -353,18 +353,18 @@ def demo():
             
             for sql in items:
                 db.exec(sql)
-            print("✅ Data inserted")
+            print("SUCCESS: Data inserted")
             
             # Query data
             results = db.query("SELECT * FROM inventory")
-            print(f"✅ Query executed, found {len(results)} rows:")
+            print(f"SUCCESS: Query executed, found {len(results)} rows:")
             for row in results:
                 print(f"   {row}")
         
-        print("✅ Original SQL API demo completed\n")
+        print("SUCCESS: Original SQL API demo completed\n")
         
     except RistrettoError as e:
-        print(f"❌ SQL API Error: {e}")
+        print(f"ERROR: SQL API Error: {e}")
     
     # Demo Table V2 API
     print("2. Table V2 Ultra-Fast API Demo (4.57x faster than SQLite)")
@@ -373,7 +373,7 @@ def demo():
     try:
         with RistrettoTable.create("python_v2_demo", 
                                  "CREATE TABLE python_v2_demo (id INTEGER, name TEXT(32), value REAL)") as table:
-            print("✅ Ultra-fast table created")
+            print("SUCCESS: Ultra-fast table created")
             
             # Insert high-speed data
             values = [
@@ -384,15 +384,15 @@ def demo():
             
             success = table.append_row(values)
             if success:
-                print("✅ High-speed row insertion completed")
+                print("SUCCESS: High-speed row insertion completed")
                 print(f"   Total rows: {table.get_row_count()}")
         
-        print("✅ Table V2 ultra-fast demo completed")
+        print("SUCCESS: Table V2 ultra-fast demo completed")
         
     except RistrettoError as e:
-        print(f"❌ Table V2 API Error: {e}")
+        print(f"ERROR: Table V2 API Error: {e}")
     
-    print("\n🎉 Python bindings demo completed!")
+    print("\nSUCCESS: Python bindings demo completed!")
     print("\nIntegration Examples:")
     print("  • IoT sensor data logging")
     print("  • High-frequency trading data")

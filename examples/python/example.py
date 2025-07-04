@@ -23,13 +23,13 @@ from ristretto import RistrettoDB, RistrettoTable, RistrettoValue, RistrettoErro
 
 def original_sql_api_example():
     """Demonstrate the Original SQL API (2.8x faster than SQLite)"""
-    print("🔧 Original SQL API Example")
+    print("Original SQL API Example")
     print("=" * 40)
     
     try:
         # Open database using context manager (auto-close)
         with RistrettoDB("python_sql_example.db") as db:
-            print(f"✅ Connected to RistrettoDB v{db.version()}")
+            print(f"SUCCESS: Connected to RistrettoDB v{db.version()}")
             
             # Create a table for storing user data
             db.exec("""
@@ -39,7 +39,7 @@ def original_sql_api_example():
                     score REAL
                 )
             """)
-            print("✅ Created 'users' table")
+            print("SUCCESS: Created 'users' table")
             
             # Insert some sample data
             users = [
@@ -52,35 +52,35 @@ def original_sql_api_example():
             for user_id, username, score in users:
                 db.exec(f"INSERT INTO users VALUES ({user_id}, '{username}', {score})")
             
-            print(f"✅ Inserted {len(users)} users")
+            print(f"SUCCESS: Inserted {len(users)} users")
             
             # Query all users
-            print("\n📊 All users:")
+            print("\nAll users:")
             results = db.query("SELECT * FROM users")
             for row in results:
                 print(f"   ID: {row['id']}, Username: {row['username']}, Score: {row['score']}")
             
             # Query high-scoring users
-            print("\n🏆 High-scoring users (score > 90):")
+            print("\nHigh-scoring users (score > 90):")
             high_scorers = db.query("SELECT username, score FROM users WHERE score > 90")
             for row in high_scorers:
                 print(f"   {row['username']}: {row['score']}")
             
-            print(f"\n✅ Found {len(high_scorers)} high-scoring users")
+            print(f"\nSUCCESS: Found {len(high_scorers)} high-scoring users")
     
     except RistrettoError as e:
-        print(f"❌ Database error: {e}")
+        print(f"ERROR: Database error: {e}")
         return False
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        print(f"ERROR: Unexpected error: {e}")
         return False
     
-    print("✅ Original SQL API example completed successfully!\n")
+    print("SUCCESS: Original SQL API example completed successfully!\n")
     return True
 
 def table_v2_api_example():
     """Demonstrate the Table V2 Ultra-Fast API (4.57x faster than SQLite)"""
-    print("⚡ Table V2 Ultra-Fast API Example")
+    print("Table V2 Ultra-Fast API Example")
     print("=" * 40)
     
     try:
@@ -96,11 +96,11 @@ def table_v2_api_example():
         """
         
         with RistrettoTable.create("sensor_data", schema) as table:
-            print("✅ Created ultra-fast 'sensor_readings' table")
+            print("SUCCESS: Created ultra-fast 'sensor_readings' table")
             print(f"   Optimized for 4.6M+ rows/second throughput")
             
             # Simulate high-speed sensor data ingestion
-            print("\n🌡️  Simulating IoT sensor data ingestion...")
+            print("\nSimulating IoT sensor data ingestion...")
             
             # Sample sensor locations
             locations = ["Kitchen", "Bedroom", "Garage", "Attic", "Basement"]
@@ -128,57 +128,57 @@ def table_v2_api_example():
                     # (In the actual implementation, this would be handled automatically)
                     
                 except Exception as e:
-                    print(f"   ⚠️  Failed to insert reading {i}: {e}")
+                    print(f"   WARNING: Failed to insert reading {i}: {e}")
             
-            print(f"✅ High-speed ingestion completed")
+            print(f"SUCCESS: High-speed ingestion completed")
             print(f"   Successfully inserted: {successful_inserts}/{total_inserts} readings")
             print(f"   Total rows in table: {table.get_row_count()}")
             
             # Performance summary
-            print(f"\n📈 Performance Summary:")
+            print(f"\nPerformance Summary:")
             print(f"   • Insertion rate: ~{total_inserts} readings simulated")
             print(f"   • Memory efficient: Fixed-width row format")
             print(f"   • Zero-copy I/O: Memory-mapped file access")
             print(f"   • Append-only: Optimized for write-heavy workloads")
     
     except RistrettoError as e:
-        print(f"❌ Table error: {e}")
+        print(f"ERROR: Table error: {e}")
         return False
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        print(f"ERROR: Unexpected error: {e}")
         return False
     
-    print("✅ Table V2 ultra-fast API example completed successfully!\n")
+    print("SUCCESS: Table V2 ultra-fast API example completed successfully!\n")
     return True
 
 def integration_examples():
     """Show practical integration examples"""
-    print("🔗 Integration Examples")
+    print("Integration Examples")
     print("=" * 30)
     
     print("Perfect use cases for RistrettoDB Python bindings:\n")
     
     examples = [
-        ("🌐 Web Applications", "High-speed session storage, user analytics"),
-        ("📊 Data Analytics", "Real-time event ingestion, time-series data"),
-        ("🤖 Machine Learning", "Feature storage, training data preparation"),
-        ("🏭 IoT Systems", "Sensor data collection, device telemetry"),
-        ("🔒 Security", "Audit trails, tamper-evident logging"),
-        ("🎮 Gaming", "Player statistics, match analytics"),
-        ("💰 Finance", "Trading data, transaction logging"),
-        ("📱 Mobile Apps", "Offline data sync, local analytics")
+        ("Web Applications", "High-speed session storage, user analytics"),
+        ("Data Analytics", "Real-time event ingestion, time-series data"),
+        ("Machine Learning", "Feature storage, training data preparation"),
+        ("IoT Systems", "Sensor data collection, device telemetry"),
+        ("Security", "Audit trails, tamper-evident logging"),
+        ("Gaming", "Player statistics, match analytics"),
+        ("Finance", "Trading data, transaction logging"),
+        ("Mobile Apps", "Offline data sync, local analytics")
     ]
     
     for category, description in examples:
         print(f"   {category}")
         print(f"     └─ {description}")
     
-    print("\n📦 Installation:")
+    print("\nInstallation:")
     print("   1. Build RistrettoDB: cd ../../ && make lib")
     print("   2. Copy bindings: cp examples/python/ristretto.py your_project/")
     print("   3. Use in your code: from ristretto import RistrettoDB")
     
-    print("\n🚀 Performance Benefits:")
+    print("\nPerformance Benefits:")
     print("   • 2.8x faster than SQLite (Original API)")
     print("   • 4.57x faster than SQLite (Table V2 API)")
     print("   • Zero external dependencies")
@@ -187,7 +187,7 @@ def integration_examples():
 
 def main():
     """Main example runner"""
-    print("🐍 RistrettoDB Python Bindings Example")
+    print("RistrettoDB Python Bindings Example")
     print("=" * 50)
     print("A tiny, blazingly fast, embeddable SQL engine")
     print("https://github.com/MonkeyIsNull/RistrettoDB")
@@ -196,11 +196,11 @@ def main():
     # Check if library is available
     try:
         version = RistrettoDB.version()
-        print(f"✅ RistrettoDB v{version} loaded successfully")
+        print(f"SUCCESS: RistrettoDB v{version} loaded successfully")
         print()
     except Exception as e:
-        print(f"❌ Failed to load RistrettoDB library: {e}")
-        print("\n💡 Make sure to build the library first:")
+        print(f"ERROR: Failed to load RistrettoDB library: {e}")
+        print("\nMake sure to build the library first:")
         print("   cd ../../ && make lib")
         return 1
     
@@ -214,10 +214,10 @@ def main():
     
     print("\n" + "=" * 50)
     if success:
-        print("🎉 All examples completed successfully!")
+        print("SUCCESS: All examples completed successfully!")
         print("   Ready to integrate RistrettoDB into your Python applications!")
     else:
-        print("⚠️  Some examples failed. Check error messages above.")
+        print("WARNING: Some examples failed. Check error messages above.")
         return 1
     
     return 0

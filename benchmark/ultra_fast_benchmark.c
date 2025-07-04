@@ -148,16 +148,16 @@ int main(void) {
     printf("  Overhead vs malloc:     %.2fx\n", baseline_overhead);
     
     if (ristretto_ns_per_row < 1000) {
-        printf("  ⚡ ULTRA-FAST: Sub-microsecond writes achieved!\n");
+        printf("  ULTRA-FAST: Sub-microsecond writes achieved!\n");
     }
     
     if (speedup > 5.0) {
-        printf("  🚀 BLAZING: >5x faster than SQLite!\n");
+        printf("  BLAZING: >5x faster than SQLite!\n");
     }
     
     printf("\nTarget Achievement:\n");
-    printf("  < 100ns per row: %s\n", ristretto_ns_per_row < 100 ? "✅ ACHIEVED" : "❌ Not yet");
-    printf("  > 1M rows/sec:   %s\n", ristretto_rows_per_sec > 1000000 ? "✅ ACHIEVED" : "❌ Not yet");
+    printf("  < 100ns per row: %s\n", ristretto_ns_per_row < 100 ? "ACHIEVED" : "Not yet");
+    printf("  > 1M rows/sec:   %s\n", ristretto_rows_per_sec > 1000000 ? "ACHIEVED" : "Not yet");
     
     // Cleanup
     system("rm -rf data/");
