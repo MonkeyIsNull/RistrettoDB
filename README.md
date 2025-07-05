@@ -1,5 +1,6 @@
 # RistrettoDB
-![ristretto Logo](ristretto_logo.png)
+
+<img src="ristretto_logo.png" alt="ttm" width="70%" />
 
 > "Bygget på koffein og høy hastighet!"
 
