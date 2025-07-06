@@ -70,6 +70,6 @@ CLAUDE.md
 
 # Ristretto Stuff
 *.db
-# Ignore accidentally created top-level binary
+# Ignore stuff that gets built in benchmarks and tests that go wrong
 /ristretto
-
+:memory:

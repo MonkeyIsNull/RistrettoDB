@@ -13,15 +13,15 @@ BIN_DIR = ../bin
 RISTRETTO_SOURCES = $(wildcard $(RISTRETTO_SRC_DIR)/*.c)
 RISTRETTO_OBJECTS = $(RISTRETTO_SOURCES:$(RISTRETTO_SRC_DIR)/%.c=%.o)
 
-# Filter out main.c from RistrettoDB sources
-RISTRETTO_LIB_SOURCES = $(filter-out $(RISTRETTO_SRC_DIR)/main.c, $(RISTRETTO_SOURCES))
+# Filter out main.c and ristretto_cli.c from RistrettoDB sources
+RISTRETTO_LIB_SOURCES = $(filter-out $(RISTRETTO_SRC_DIR)/main.c $(RISTRETTO_SRC_DIR)/ristretto_cli.c, $(RISTRETTO_SOURCES))
 RISTRETTO_LIB_OBJECTS = $(RISTRETTO_LIB_SOURCES:$(RISTRETTO_SRC_DIR)/%.c=%.o)
 
 # Benchmark executables
 BENCHMARKS = benchmark microbench speedtest_subset ultra_fast_benchmark
 
 # Include paths
-INCLUDES = -I$(RISTRETTO_INC_DIR)
+INCLUDES = -I$(RISTRETTO_INC_DIR) -I../embed
 
 .PHONY: all clean benchmarks run-all
 

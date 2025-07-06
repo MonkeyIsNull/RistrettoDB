@@ -1,9 +1,9 @@
 CC = clang
-CFLAGS = -O3 -march=native -std=c11 -Wall -Wextra -Wpedantic -Iinclude -I.
+CFLAGS = -O3 -march=native -std=c11 -Wall -Wextra -Wpedantic -Iinclude -Iembed -I.
 LDFLAGS = 
 DEBUGFLAGS = -g -O0 -DDEBUG
 TARGET = ristretto
-TEST_TARGET = test_ristretto
+TEST_TARGET = test_basic
 TEST_V2_TARGET = test_table_v2
 TEST_COMPREHENSIVE_TARGET = test_comprehensive
 TEST_ORIGINAL_TARGET = test_original_api
@@ -38,13 +38,13 @@ TEST_SOURCES = $(wildcard $(TEST_DIR)/*.c)
 TEST_OBJECTS = $(patsubst $(TEST_DIR)/%.c,$(BUILD_DIR)/test_%.o,$(TEST_SOURCES))
 
 .PHONY: all clean debug test test-v2 test-comprehensive test-original test-stress test-all run benchmark
-.PHONY: lib static dynamic install uninstall example
+.PHONY: libraries static dynamic install uninstall example
 
 # Default target builds both CLI and libraries
-all: $(BUILD_DIR) $(BIN_DIR) $(LIB_DIR) $(BIN_DIR)/$(TARGET) lib
+all: $(BUILD_DIR) $(BIN_DIR) $(LIB_DIR) $(BIN_DIR)/$(TARGET) libraries
 
 # Library targets  
-lib: $(LIB_DIR)/$(STATIC_LIB) $(LIB_DIR)/$(DYNAMIC_LIB)
+libraries: $(LIB_DIR)/$(STATIC_LIB) $(LIB_DIR)/$(DYNAMIC_LIB)
 
 static: $(LIB_DIR)/$(STATIC_LIB)
 
@@ -79,7 +79,7 @@ $(LIB_DIR)/$(DYNAMIC_LIB): $(LIB_OBJECTS) | $(LIB_DIR)
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c $(HEADERS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -fPIC -c -o $@ $<
 
-$(BUILD_DIR)/test_%.o: $(TEST_DIR)/%.c $(HEADERS) | $(BUILD_DIR)
+$(BUILD_DIR)/test_%.o: $(TEST_DIR)/test_%.c $(HEADERS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Test targets
@@ -100,16 +100,16 @@ test-stress: $(BIN_DIR)/$(TEST_STRESS_TARGET)
 
 test-all: test test-v2 test-comprehensive test-original test-stress
 	@echo ""
-	@echo "🎉 ALL TEST SUITES COMPLETED!"
-	@echo "✅ Original API tests"
-	@echo "✅ Table V2 basic tests" 
-	@echo "✅ Comprehensive functionality tests"
-	@echo "✅ Original SQL API tests"
-	@echo "✅ Stress and performance tests"
+	@echo "ALL TEST SUITES COMPLETED!"
+	@echo "Original API tests"
+	@echo "Table V2 basic tests" 
+	@echo "Comprehensive functionality tests"
+	@echo "Original SQL API tests"
+	@echo "Stress and performance tests"
 
 # Test executables (link against static library)
-$(BIN_DIR)/$(TEST_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_ristretto.o
-	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_ristretto.o -L$(LIB_DIR) -lristretto $(LDFLAGS)
+$(BIN_DIR)/$(TEST_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_basic.o
+	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_basic.o -L$(LIB_DIR) -lristretto $(LDFLAGS)
 
 $(BIN_DIR)/$(TEST_V2_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_table_v2.o
 	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_table_v2.o -L$(LIB_DIR) -lristretto $(LDFLAGS)
@@ -157,7 +157,7 @@ install: all
 	cp $(BIN_DIR)/$(TARGET) $(BINDIR)/
 	cp $(LIB_DIR)/$(STATIC_LIB) $(LIBDIR)/
 	cp $(LIB_DIR)/$(DYNAMIC_LIB) $(LIBDIR)/
-	cp ristretto.h $(INCLUDEDIR)/
+	cp embed/ristretto.h $(INCLUDEDIR)/
 	ldconfig || true
 
 uninstall:
@@ -204,7 +204,7 @@ help:
 	@echo ""
 	@echo "Main targets:"
 	@echo "  make              - Build CLI and libraries"
-	@echo "  make lib          - Build both static and dynamic libraries"
+	@echo "  make libraries    - Build both static and dynamic libraries"
 	@echo "  make static       - Build static library (libristretto.a)"
 	@echo "  make dynamic      - Build dynamic library (libristretto.so)"
 	@echo "  make debug        - Build with debug symbols"
