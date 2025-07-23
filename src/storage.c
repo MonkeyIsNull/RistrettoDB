@@ -1,4 +1,5 @@
 #include "storage.h"
+#include "btree.h"
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
@@ -40,6 +41,7 @@ Table* storage_table_create(const char* name) {
     table->root_page = 0;
     table->row_count = 0;
     table->next_row_id = 1;
+    table->primary_index = NULL; // Will be created when first INTEGER column is added
     
     return table;
 }
@@ -47,6 +49,11 @@ Table* storage_table_create(const char* name) {
 void storage_table_destroy(Table* table) {
     if (!table) {
         return;
+    }
+    
+    // Clean up index if it exists
+    if (table->primary_index) {
+        btree_destroy(table->primary_index);
     }
     
     free(table->columns);
@@ -100,6 +107,11 @@ void storage_row_destroy(Row* row) {
 }
 
 void storage_row_set_value(Row* row, Table* table, uint32_t col_index, Value* value) {
+    // Defensive: validate all parameters
+    if (!row || !table || !value || !row->data || !table->columns) {
+        return;
+    }
+    
     if (col_index >= table->column_count) {
         return;
     }
@@ -137,7 +149,8 @@ void storage_row_set_value(Row* row, Table* table, uint32_t col_index, Value* va
 }
 
 Value* storage_row_get_value(Row* row, Table* table, uint32_t col_index) {
-    if (col_index >= table->column_count) {
+    // Add comprehensive null checks
+    if (!row || !table || !row->data || col_index >= table->column_count) {
         return NULL;
     }
     
@@ -147,8 +160,14 @@ Value* storage_row_get_value(Row* row, Table* table, uint32_t col_index) {
     }
     
     Column* col = &table->columns[col_index];
-    uint8_t* src = row->data + col->offset;
     
+    // Ensure we don't read past row data bounds
+    if (col->offset + col->size > row->size) {
+        free(value);
+        return NULL;
+    }
+    
+    uint8_t* src = row->data + col->offset;
     value->type = col->type;
     
     switch (col->type) {
@@ -156,20 +175,52 @@ Value* storage_row_get_value(Row* row, Table* table, uint32_t col_index) {
             break;
             
         case TYPE_INTEGER:
-            memcpy(&value->value.integer, src, sizeof(int64_t));
+            if (col->size >= sizeof(int64_t)) {
+                memcpy(&value->value.integer, src, sizeof(int64_t));
+            } else {
+                value->value.integer = 0;
+            }
             break;
             
         case TYPE_REAL:
-            memcpy(&value->value.real, src, sizeof(double));
-            break;
-            
-        case TYPE_TEXT:
-            value->value.text.len = strlen((char*)src);
-            value->value.text.data = malloc(value->value.text.len + 1);
-            if (value->value.text.data) {
-                strcpy(value->value.text.data, (char*)src);
+            if (col->size >= sizeof(double)) {
+                memcpy(&value->value.real, src, sizeof(double));
+            } else {
+                value->value.real = 0.0;
             }
             break;
+            
+        case TYPE_TEXT: {
+            // CRITICAL FIX: Safe TEXT handling with bounds checking
+            char* text_src = (char*)src;
+            size_t max_len = col->size > 0 ? col->size - 1 : 0; // Reserve space for null terminator
+            size_t actual_len = 0;
+            
+            // Find actual string length up to max_len, ensuring null termination
+            for (size_t i = 0; i < max_len; i++) {
+                if (text_src[i] == '\0') {
+                    actual_len = i;
+                    break;
+                }
+                actual_len = i + 1;
+            }
+            
+            value->value.text.len = actual_len;
+            value->value.text.data = malloc(actual_len + 1);
+            if (value->value.text.data) {
+                if (actual_len > 0) {
+                    memcpy(value->value.text.data, text_src, actual_len);
+                }
+                value->value.text.data[actual_len] = '\0'; // Ensure null termination
+            } else {
+                free(value);
+                return NULL;
+            }
+            break;
+        }
+        default:
+            free(value);
+            return NULL;
     }
     
     return value;

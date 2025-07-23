@@ -576,7 +576,7 @@ bool test_file_growth(void) {
     
     printf("\n    Final file size: %zu bytes", table->mapped_size);
     REQUIRE(table->mapped_size > initial_size, "File should have grown");
-    REQUIRE(table->header->num_rows == rows_to_insert, "Row count mismatch after growth");
+    REQUIRE(table->header->num_rows == (uint64_t)rows_to_insert, "Row count mismatch after growth");
     
     table_close(table);
     return true;

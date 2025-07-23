@@ -10,7 +10,10 @@ typedef enum {
     PLAN_TABLE_SCAN,
     PLAN_INDEX_SCAN,
     PLAN_INSERT,
-    PLAN_CREATE_TABLE
+    PLAN_CREATE_TABLE,
+    PLAN_SHOW_TABLES,
+    PLAN_DESCRIBE,
+    PLAN_SHOW_CREATE_TABLE
 } PlanType;
 
 typedef struct QueryPlan {
@@ -29,6 +32,15 @@ typedef struct QueryPlan {
         struct {
             CreateTableStmt *stmt;
         } create_table;
+        struct {
+            char *pattern;
+        } show_tables;
+        struct {
+            char *table_name;
+        } describe;
+        struct {
+            char *table_name;
+        } show_create_table;
     } data;
 } QueryPlan;
 

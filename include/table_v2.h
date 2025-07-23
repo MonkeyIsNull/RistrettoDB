@@ -7,7 +7,7 @@
 #include <sys/mman.h>
 
 #define MAX_COLUMNS 14
-#define MAX_COLUMN_NAME 8
+#define MAX_COLUMN_NAME 32
 #define TABLE_HEADER_SIZE 256
 #define INITIAL_FILE_SIZE (1024 * 1024)  // 1 MB initial size
 #define GROWTH_FACTOR 2                   // Double size when growing

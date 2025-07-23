@@ -7,7 +7,10 @@
 typedef enum {
     STMT_CREATE_TABLE,
     STMT_INSERT,
-    STMT_SELECT
+    STMT_SELECT,
+    STMT_SHOW_TABLES,
+    STMT_DESCRIBE,
+    STMT_SHOW_CREATE_TABLE
 } StatementType;
 
 typedef enum {
@@ -65,6 +68,17 @@ typedef struct {
     Expr *where_clause;
 } SelectStmt;
 
+typedef struct {
+    char *pattern; // Optional LIKE pattern
+} ShowTablesStmt;
+
+typedef struct {
+    char *table_name;
+} DescribeStmt;
+
+typedef struct {
+    char *table_name;
+} ShowCreateTableStmt;
 
 typedef struct {
     StatementType type;
@@ -72,6 +86,9 @@ typedef struct {
         CreateTableStmt create_table;
         InsertStmt insert;
         SelectStmt select;
+        ShowTablesStmt show_tables;
+        DescribeStmt describe;
+        ShowCreateTableStmt show_create_table;
     } data;
 } Statement;
 
