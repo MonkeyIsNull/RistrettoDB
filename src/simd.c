@@ -82,6 +82,7 @@ size_t simd_count_set_bits(const uint8_t *bitmap, size_t count) {
 void simd_filter_eq_i32_vectorized(const int32_t *column, size_t count, int32_t value, uint8_t *bitmap) {
     size_t vector_count = count / 4;
     size_t remainder = count % 4;
+    (void)remainder; // Suppress unused variable warning - may be used in future implementations
     
     v4i target = {value, value, value, value};
     
@@ -110,6 +111,7 @@ void simd_filter_eq_i32_vectorized(const int32_t *column, size_t count, int32_t 
 void simd_filter_gt_i32_vectorized(const int32_t *column, size_t count, int32_t value, uint8_t *bitmap) {
     size_t vector_count = count / 4;
     size_t remainder = count % 4;
+    (void)remainder; // Suppress unused variable warning - may be used in future implementations
     
     v4i target = {value, value, value, value};
     

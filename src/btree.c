@@ -26,7 +26,7 @@ static uint32_t* get_node_keys(void* node) {
 }
 
 static uint32_t* get_internal_node_children(void* node) {
-    NodeHeader* header = get_node_header(node);
+    (void)node; // Suppress unused parameter warning if header not needed
     return (uint32_t*)((uint8_t*)node + sizeof(NodeHeader) + 
                        sizeof(uint32_t) * (BTREE_ORDER - 1));
 }
@@ -88,6 +88,7 @@ void btree_destroy(BTree* btree) {
 }
 
 static bool leaf_node_insert(BTree* btree, void* node, uint32_t key, RowId value) {
+    (void)btree; // Suppress unused parameter warning
     NodeHeader* header = get_node_header(node);
     uint32_t* keys = get_node_keys(node);
     RowId* values = get_leaf_node_values(node);

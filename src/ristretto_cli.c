@@ -128,7 +128,11 @@ int main(int argc, char** argv) {
         }
         
         RistrettoResult result;
-        if (strncasecmp(input, "SELECT", 6) == 0) {
+        if (strncasecmp(input, "SELECT", 6) == 0 ||
+            strncasecmp(input, "SHOW TABLES", 11) == 0 ||
+            strncasecmp(input, "SHOW CREATE TABLE", 17) == 0 ||
+            strncasecmp(input, "DESCRIBE", 8) == 0 ||
+            strncasecmp(input, "DESC", 4) == 0) {
             result = ristretto_query(db, input, query_callback, NULL);
         } else {
             result = ristretto_exec(db, input);
@@ -136,7 +140,11 @@ int main(int argc, char** argv) {
         
         if (result != RISTRETTO_OK) {
             fprintf(stderr, "Error: %s\n", ristretto_error_string(result));
-        } else if (strncasecmp(input, "SELECT", 6) != 0) {
+        } else if (strncasecmp(input, "SELECT", 6) != 0 &&
+                   strncasecmp(input, "SHOW TABLES", 11) != 0 &&
+                   strncasecmp(input, "SHOW CREATE TABLE", 17) != 0 &&
+                   strncasecmp(input, "DESCRIBE", 8) != 0 &&
+                   strncasecmp(input, "DESC", 4) != 0) {
             printf("OK\n");
         }
     }

@@ -64,7 +64,7 @@ $(LIB_DIR):
 
 # Build CLI executable (links against static library)
 $(BIN_DIR)/$(TARGET): $(LIB_DIR)/$(STATIC_LIB) $(CLI_OBJECTS)
-	$(CC) $(CFLAGS) -o $@ $(CLI_OBJECTS) -L$(LIB_DIR) -lristretto $(LDFLAGS)
+	$(CC) $(CFLAGS) -o $@ $(CLI_OBJECTS) $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
 
 # Build static library
 $(LIB_DIR)/$(STATIC_LIB): $(LIB_OBJECTS) | $(LIB_DIR)

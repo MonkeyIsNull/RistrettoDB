@@ -5,6 +5,9 @@
 #include <stddef.h>
 #include "pager.h"
 
+// Forward declaration for BTree
+struct BTree;
+
 typedef enum {
     TYPE_NULL = 0,
     TYPE_INTEGER = 1,
@@ -39,6 +42,7 @@ typedef struct {
     uint32_t root_page;
     uint32_t row_count;
     uint32_t next_row_id;
+    struct BTree *primary_index; // B-tree index on first INTEGER column (if exists)
 } Table;
 
 typedef struct {

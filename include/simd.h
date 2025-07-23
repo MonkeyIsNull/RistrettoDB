@@ -29,4 +29,10 @@ void simd_bitmap_or(const uint8_t *a, const uint8_t *b, uint8_t *result, size_t 
 
 size_t simd_count_set_bits(const uint8_t *bitmap, size_t count);
 
+// Fast SIMD functions that automatically choose vectorized or scalar versions
+#ifdef __clang__
+void simd_filter_eq_i32_fast(const int32_t *column, size_t count, int32_t value, uint8_t *bitmap);
+void simd_filter_gt_i32_fast(const int32_t *column, size_t count, int32_t value, uint8_t *bitmap);
+#endif
+
 #endif
