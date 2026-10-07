@@ -107,6 +107,39 @@ jobs:
           clang $SAN -o san_embedded embed/test_embedded.c ristretto_amalg_san.o
           ./san_embedded
 
+  # Function-type UBSan over the Go (cgo) binding. The bridge calls the internal
+  # table_select, whose callback type is void(*)(void*, const Value*); the fix
+  # forwards through a trampoline of that exact type instead of casting the cgo
+  # function pointer. -fsanitize=function (clang >= 17 for C, which ubuntu-latest
+  # ships) would flag any reintroduced function-pointer cast as a "call through
+  # pointer to incorrect function type". Both the static lib (where table_select
+  # makes the indirect call) and the cgo C (where goSelectCallback is defined)
+  # must be instrumented for the check to fire, so the lib is rebuilt with the
+  # sanitizer and the cgo flags carry it too.
+  go-binding-ubsan:
+    name: Go binding -fsanitize=function (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Build + run Go binding under -fsanitize=function
+        run: |
+          set -e
+          clang --version
+          SAN="-fsanitize=function,undefined -fno-sanitize-recover=all"
+          make clean
+          make static CC=clang \
+            CFLAGS="-O1 -g -std=c11 -D_DEFAULT_SOURCE -Iinclude -Iembed -I. -fPIC $SAN"
+          cd examples/go
+          CC=clang \
+          CGO_CFLAGS="-O1 -g $SAN" \
+          CGO_LDFLAGS="$SAN" \
+            go test -count=1 ./ristretto
+
   # Fuzz smoke over the schema parser. ubuntu-latest only: Apple clang ships no
   # libFuzzer runtime, so this cannot run on the macOS runner or locally on
   # arm64. Portable baseline, no -march=native.
