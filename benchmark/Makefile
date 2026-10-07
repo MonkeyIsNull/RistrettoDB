@@ -1,6 +1,12 @@
 # Benchmark suite for RistrettoDB vs SQLite
 CC = clang
-CFLAGS = -O3 -march=native -std=c11 -Wall -Wextra -Wpedantic
+# Portable baseline by default (-march=native produces binaries that SIGILL on
+# a different CPU). Opt into host tuning with:  make SIMD=native
+SIMD ?= portable
+CFLAGS = -O3 -std=c11 -Wall -Wextra -Wpedantic
+ifeq ($(SIMD),native)
+CFLAGS += -march=native
+endif
 LDFLAGS = -lsqlite3 -lm
 
 # Directories

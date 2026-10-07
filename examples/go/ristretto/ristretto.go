@@ -35,12 +35,18 @@
 // restarts. Rows are fixed width: INTEGER and REAL are 8 bytes, TEXT(n) is n
 // bytes (values are truncated to n-1 bytes + NUL).
 //
+// The on-disk format is version 2 (1024-byte header). Version-1 .rdb files
+// written by older builds are not readable and are rejected cleanly on open.
+// CreateTable recreates its file each run, so this binding is unaffected.
+//
 // # Known limitations
 //
 //   - V2 does not persist NULL-ness: a NULL written to a column reads back as
 //     the zero value for that column (0, 0.0, or ""). See NullValue.
-//   - table_select in C currently ignores the WHERE clause, so Scan returns
-//     every row; filter in Go.
+//   - The V2 table_select in C ignores the WHERE clause, so Scan returns every
+//     row; filter in Go. (The Original SQL API's WHERE is evaluated in C.)
+//   - No WAL: Close performs a durable msync+fsync, but a crash mid-run may
+//     lose rows written since the last sync.
 //   - The SQL API builds queries from strings (no bound parameters).
 package ristretto
 

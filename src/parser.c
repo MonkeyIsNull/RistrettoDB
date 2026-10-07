@@ -94,9 +94,9 @@ static char* parse_identifier(Scanner* scanner) {
     return identifier;
 }
 
-static Value* parse_value(Scanner* scanner) {
+static SqlValue* parse_value(Scanner* scanner) {
     skip_whitespace(scanner);
-    Value* value = malloc(sizeof(Value));
+    SqlValue* value = malloc(sizeof(SqlValue));
     if (!value) return NULL;
     
     char c = peek(scanner);
@@ -284,8 +284,8 @@ static Statement* parse_insert(Scanner* scanner) {
     do {
         if (stmt->data.insert.value_count >= capacity) {
             capacity = capacity ? capacity * 2 : 4;
-            Value* new_vals = realloc(stmt->data.insert.values,
-                                      capacity * sizeof(Value));
+            SqlValue* new_vals = realloc(stmt->data.insert.values,
+                                      capacity * sizeof(SqlValue));
             if (!new_vals) {
                 statement_destroy(stmt);
                 return NULL;
@@ -293,7 +293,7 @@ static Statement* parse_insert(Scanner* scanner) {
             stmt->data.insert.values = new_vals;
         }
         
-        Value* val = parse_value(scanner);
+        SqlValue* val = parse_value(scanner);
         if (!val) {
             statement_destroy(stmt);
             return NULL;
@@ -402,6 +402,8 @@ static Expr* parse_comparison(Scanner* scanner) {
         }
     } else if (expect_char(scanner, '!') && expect_char(scanner, '=')) {
         op = OP_NE;
+    } else if (match_keyword(scanner, "LIKE")) {
+        op = OP_LIKE;
     } else {
         return left; // No operator, return the primary expression
     }
@@ -441,7 +443,7 @@ static Expr* parse_primary(Scanner* scanner) {
     }
     
     // Try to parse as a literal value
-    Value* value = parse_value(scanner);
+    SqlValue* value = parse_value(scanner);
     if (value) {
         Expr* expr = malloc(sizeof(Expr));
         if (expr) {

@@ -7,7 +7,7 @@ High-performance Node.js bindings for RistrettoDB, the tiny, blazingly fast, emb
 - **Original SQL API**: 2.8x faster than SQLite for general SQL operations
 - **Table V2 Ultra-Fast API**: 4.57x faster than SQLite for append-only workloads
 - **Async/Await Compatible**: Non-blocking I/O friendly
-- **Zero Dependencies**: Uses only ffi-napi and ref-napi for C interop
+- **Single Dependency**: Uses koffi (a maintained, prebuilt FFI with no native build step) for C interop
 - **Memory Efficient**: Direct memory-mapped file access
 - **Error Handling**: Comprehensive error handling with detailed messages
 
@@ -25,7 +25,7 @@ High-performance Node.js bindings for RistrettoDB, the tiny, blazingly fast, emb
 ```bash
 # From the RistrettoDB root directory
 cd ../../
-make lib
+make dynamic
 ```
 
 ### 2. Install Dependencies
@@ -74,7 +74,7 @@ table.close();
 ### Dependencies
 
 ```bash
-npm install ffi-napi ref-napi
+npm install
 ```
 
 ### Copy Bindings
@@ -298,13 +298,13 @@ wss.on('connection', (ws) => {
 
 ## Architecture
 
-The Node.js bindings use `ffi-napi` to interface with the RistrettoDB C library:
+The Node.js bindings use `koffi` to interface with the RistrettoDB C library:
 
 ```
 Node.js Application
        ↓
   Node.js Bindings (ristretto.js)
-       ↓ ffi-napi
+       ↓ koffi
   RistrettoDB C Library (libristretto.so)
        ↓
   Memory-Mapped Files
@@ -312,10 +312,10 @@ Node.js Application
 
 ## Requirements
 
-- **Node.js**: 12.0.0+
-- **Dependencies**: ffi-napi, ref-napi
+- **Node.js**: 18.0.0+
+- **Dependencies**: koffi
 - **System**: POSIX-compliant (Linux, macOS, BSD)
-- **RistrettoDB**: Library built (`make lib`)
+- **RistrettoDB**: Shared library built (`make dynamic`)
 
 ## Dependencies
 
@@ -324,15 +324,14 @@ The bindings require these Node.js packages:
 ```json
 {
   "dependencies": {
-    "ffi-napi": "^4.0.3",
-    "ref-napi": "^3.0.3"
+    "koffi": "^2.9.0"
   }
 }
 ```
 
 Install with:
 ```bash
-npm install ffi-napi ref-napi
+npm install
 ```
 
 ## Thread Safety
@@ -351,16 +350,16 @@ Error: Could not find libristretto.so
 ```
 **Solution**: Build the library first:
 ```bash
-cd ../../ && make lib
+cd ../../ && make dynamic
 ```
 
-### ffi-napi Installation Issues
+### koffi Installation Issues
 ```
-Error: Cannot find module 'ffi-napi'
+Error: Cannot find module 'koffi'
 ```
 **Solution**: Install dependencies:
 ```bash
-npm install ffi-napi ref-napi
+npm install
 ```
 
 ### Permission Denied
@@ -373,7 +372,7 @@ Error: EACCES: permission denied
 ```
 Error: Unsupported Node.js version
 ```
-**Solution**: Use Node.js 12.0.0 or higher
+**Solution**: Use Node.js 18.0.0 or higher
 
 ## Production Deployment
 

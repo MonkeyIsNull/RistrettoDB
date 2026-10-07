@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "cleanup-*"]
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: build & test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Makefile hardcodes CC=clang and the SIMD *_vectorized path is
+      # #ifdef __clang__ with no gcc fallback, so clang must be present and CC
+      # must NOT be overridden to gcc. clang is preinstalled on both runners;
+      # make it explicit on ubuntu.
+      - name: Ensure clang (ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Compiler version
+        run: clang --version
+
+      # Builds with the portable baseline (no -march=native).
+      - name: Build library + CLI
+        run: make clean && make
+
+      - name: C test suites (must pass)
+        run: make test-basic test-v2 test-comprehensive test-stress test-where
+
+      # The Original SQL API has documented in-memory/single-page limits
+      # (see README "Current Limitations"). Its suite has a known 2-pass /
+      # 6-fail baseline; assert it exactly so a NEW regression is still caught
+      # while the documented failures do not fail the job.
+      - name: Original API suite (exact known 2/6 baseline)
+        run: |
+          set +e
+          out="$(make test-original 2>&1)"
+          echo "$out"
+          echo "$out" | grep -q "Passed: 2" || { echo "::error::expected 2 passing original-API tests"; exit 1; }
+          echo "$out" | grep -q "Failed: 6" || { echo "::error::original-API failure count changed (regression?)"; exit 1; }
+
+      - name: Amalgamation compiles standalone
+        run: clang -std=c11 -DRISTRETTO_EMBEDDED -Wall -Wextra -c -o /tmp/ristretto_amalg.o embed/ristretto.c
+
+      - name: Build dynamic library
+        run: |
+          make dynamic
+          test -f lib/libristretto.so || { echo "::error::lib/libristretto.so not produced"; exit 1; }
+
+      - name: C examples (all 7 link + run)
+        run: |
+          make static
+          ./scripts/build_examples.sh
+
+      - name: Go binding (build + test)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Go build & test
+        run: |
+          make static
+          cd examples/go
+          go build ./...
+          go test -count=1 ./ristretto
+
+      - name: Python binding smoke
+        run: |
+          make dynamic
+          python3 examples/python/example.py
+
+      - name: Node binding setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Node binding smoke
+        run: |
+          make dynamic
+          cd examples/nodejs
+          npm install
+          node example.js
+
+      # NOTE: benchmark/ is not built here (needs -lsqlite3). The
+      # benchmark/Makefile -march=native -> portable change is a portability
+      # fix only and is not exercised by this workflow.

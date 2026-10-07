@@ -6,7 +6,7 @@
 
 typedef struct {
     char name[64];
-    Table* table;
+    SqlTable* table;
 } TableEntry;
 
 typedef struct {
@@ -23,7 +23,7 @@ static TableCatalog* get_catalog(RistrettoDB* db) {
     return &catalog;
 }
 
-static Table* find_table(RistrettoDB* db, const char* name) {
+static SqlTable* find_table(RistrettoDB* db, const char* name) {
     if (!db || !name) {
         return NULL;
     }
@@ -42,7 +42,7 @@ static Table* find_table(RistrettoDB* db, const char* name) {
     return NULL;
 }
 
-static bool register_table(RistrettoDB* db, Table* table) {
+static bool register_table(RistrettoDB* db, SqlTable* table) {
     TableCatalog* catalog = get_catalog(db);
     
     if (catalog->count >= catalog->capacity) {
@@ -65,7 +65,7 @@ static bool register_table(RistrettoDB* db, Table* table) {
 static RistrettoResult execute_select_simd(QueryContext* ctx);
 
 // Check if WHERE clause can use primary index (equality on first INTEGER column)
-static bool can_use_primary_index(Expr* filter, Table* table) {
+static bool can_use_primary_index(Expr* filter, SqlTable* table) {
     if (!filter || !table || table->column_count == 0) {
         return false;
     }
@@ -245,11 +245,11 @@ void plan_destroy(QueryPlan* plan) {
             break;
             
         case PLAN_DESCRIBE:
-            // Table name is owned by the statement, not the plan
+            // SqlTable name is owned by the statement, not the plan
             break;
             
         case PLAN_SHOW_CREATE_TABLE:
-            // Table name is owned by the statement, not the plan
+            // SqlTable name is owned by the statement, not the plan
             break;
     }
     
@@ -265,7 +265,7 @@ static RistrettoResult execute_create_table(QueryContext* ctx) {
     }
     
     // Create new table
-    Table* table = storage_table_create(stmt->table_name);
+    SqlTable* table = storage_table_create(stmt->table_name);
     if (!table) {
         return RISTRETTO_NOMEM;
     }
@@ -293,8 +293,8 @@ static RistrettoResult execute_create_table(QueryContext* ctx) {
 }
 
 static RistrettoResult execute_insert(QueryContext* ctx) {
-    Table* table = ctx->plan->table;
-    Value* values = ctx->plan->data.insert.values;
+    SqlTable* table = ctx->plan->table;
+    SqlValue* values = ctx->plan->data.insert.values;
     uint32_t value_count = ctx->plan->data.insert.value_count;
     
     // Check column count
@@ -356,7 +356,7 @@ static RistrettoResult execute_insert(QueryContext* ctx) {
     return RISTRETTO_OK;
 }
 
-static char* value_to_string(Value* value) {
+static char* value_to_string(SqlValue* value) {
     if (!value) {
         char* result = malloc(5);
         if (result) strcpy(result, "NULL");
@@ -429,7 +429,7 @@ static char* value_to_string(Value* value) {
 }
 
 // Check if filter can be optimized with SIMD
-static bool can_use_simd_filter(Expr* filter, Table* table) {
+static bool can_use_simd_filter(Expr* filter, SqlTable* table) {
     if (!filter || !table || table->column_count == 0) {
         return false;
     }
@@ -470,13 +470,21 @@ static bool can_use_simd_filter(Expr* filter, Table* table) {
     return false;
 }
 
+// True if the expression tree contains a (currently unsupported) LIKE operator.
+static bool expr_uses_like(Expr* expr) {
+    if (!expr || expr->type != EXPR_BINARY_OP) return false;
+    if (expr->data.binary.op == OP_LIKE) return true;
+    return expr_uses_like(expr->data.binary.left) ||
+           expr_uses_like(expr->data.binary.right);
+}
+
 static RistrettoResult execute_select(QueryContext* ctx) {
     // Add comprehensive validation
     if (!ctx || !ctx->plan) {
         return RISTRETTO_ERROR;
     }
     
-    Table* table = ctx->plan->table;
+    SqlTable* table = ctx->plan->table;
     if (!table || table->column_count == 0) {
         return RISTRETTO_ERROR;
     }
@@ -484,13 +492,23 @@ static RistrettoResult execute_select(QueryContext* ctx) {
     if (!ctx->callback) {
         return RISTRETTO_OK; // No callback to send results to
     }
-    
+
+    Expr* filter = ctx->plan->data.scan.filter;
+
+    // LIKE is parsed but not yet evaluable. Surface it explicitly rather than
+    // silently returning the wrong row set (previously all rows; a bare
+    // default would now return zero). See the "Limitations" section.
+    if (expr_uses_like(filter)) {
+        fprintf(stderr, "RistrettoDB: LIKE operator is not supported yet\n");
+        return RISTRETTO_ERROR;
+    }
+
     // Check if we can use SIMD optimization
     bool use_simd = can_use_simd_filter(ctx->plan->data.scan.filter, table);
     if (use_simd && table->row_count > 100) {
         return execute_select_simd(ctx);
     }
-    
+
     // Prepare column names
     char** col_names = malloc(table->column_count * sizeof(char*));
     if (!col_names) return RISTRETTO_NOMEM;
@@ -509,7 +527,14 @@ static RistrettoResult execute_select(QueryContext* ctx) {
     while (!table_scanner_at_end(scanner)) {
         Row* row = table_scanner_next(scanner);
         if (!row) break;
-        
+
+        // Apply the WHERE filter. evaluate_expr returns true when filter is
+        // NULL, so an unfiltered SELECT is unaffected.
+        if (filter && !evaluate_expr(filter, row, table)) {
+            storage_row_destroy(row);
+            continue;
+        }
+
         // Convert row values to strings
         char** values = malloc(table->column_count * sizeof(char*));
         if (!values) {
@@ -524,7 +549,7 @@ static RistrettoResult execute_select(QueryContext* ctx) {
         
         bool row_valid = true;
         for (uint32_t i = 0; i < table->column_count; i++) {
-            Value* val = storage_row_get_value(row, table, i);
+            SqlValue* val = storage_row_get_value(row, table, i);
             if (val) {
                 values[i] = value_to_string(val);
                 storage_value_destroy(val);
@@ -563,7 +588,7 @@ static RistrettoResult execute_select(QueryContext* ctx) {
 }
 
 static RistrettoResult execute_select_simd(QueryContext* ctx) {
-    Table* table = ctx->plan->table;
+    SqlTable* table = ctx->plan->table;
     Expr* filter = ctx->plan->data.scan.filter;
     
     if (!filter || filter->type != EXPR_BINARY_OP) {
@@ -640,7 +665,7 @@ static RistrettoResult execute_select_simd(QueryContext* ctx) {
         Row* row = table_scanner_next(scanner);
         if (!row) break;
         
-        Value* val = storage_row_get_value(row, table, col_index);
+        SqlValue* val = storage_row_get_value(row, table, col_index);
         if (val && val->type == TYPE_INTEGER) {
             column_data[row_index] = val->value.integer;
             storage_value_destroy(val);
@@ -696,7 +721,7 @@ static RistrettoResult execute_select_simd(QueryContext* ctx) {
             if (values) {
                 bool row_valid = true;
                 for (uint32_t i = 0; i < table->column_count; i++) {
-                    Value* val = storage_row_get_value(row, table, i);
+                    SqlValue* val = storage_row_get_value(row, table, i);
                     if (val) {
                         values[i] = value_to_string(val);
                         storage_value_destroy(val);
@@ -740,7 +765,7 @@ static RistrettoResult execute_index_scan(QueryContext* ctx) {
         return RISTRETTO_ERROR;
     }
     
-    Table* table = ctx->plan->table;
+    SqlTable* table = ctx->plan->table;
     if (!table->primary_index || table->column_count == 0) {
         return RISTRETTO_ERROR; // No index or empty table
     }
@@ -803,7 +828,7 @@ static RistrettoResult execute_index_scan(QueryContext* ctx) {
             
             bool row_valid = true;
             for (uint32_t i = 0; i < table->column_count; i++) {
-                Value* val = storage_row_get_value(row, table, i);
+                SqlValue* val = storage_row_get_value(row, table, i);
                 if (val) {
                     values[i] = value_to_string(val);
                     storage_value_destroy(val);
@@ -883,7 +908,7 @@ static RistrettoResult execute_show_tables(QueryContext* ctx) {
 }
 
 static RistrettoResult execute_describe(QueryContext* ctx) {
-    Table* table = ctx->plan->table;
+    SqlTable* table = ctx->plan->table;
     if (!table) {
         return RISTRETTO_ERROR;
     }
@@ -932,7 +957,7 @@ static RistrettoResult execute_describe(QueryContext* ctx) {
 }
 
 static RistrettoResult execute_show_create_table(QueryContext* ctx) {
-    Table* table = ctx->plan->table;
+    SqlTable* table = ctx->plan->table;
     if (!table) {
         return RISTRETTO_ERROR;
     }
@@ -942,7 +967,7 @@ static RistrettoResult execute_show_create_table(QueryContext* ctx) {
     }
     
     // Prepare column names for SHOW CREATE TABLE output
-    char* col_names[] = {"Table", "Create Table"};
+    char* col_names[] = {"SqlTable", "Create SqlTable"};
     
     // Generate CREATE TABLE statement
     char* create_stmt = malloc(4096); // Large buffer for CREATE TABLE statement
@@ -1022,12 +1047,26 @@ RistrettoResult execute_plan(QueryContext* ctx) {
 }
 
 // Helper function for expression to value conversion
-static Value* evaluate_expr_to_value(Expr* expr, Row* row, Table* table);
+static SqlValue* evaluate_expr_to_value(Expr* expr, Row* row, SqlTable* table);
 
 // Helper function for value comparison
-static int storage_value_compare(Value* left, Value* right) {
-    if (left->type != right->type) return -1; // Type mismatch
-    
+static int storage_value_compare(SqlValue* left, SqlValue* right) {
+    // Numeric coercion: compare INTEGER and REAL operands as doubles so a
+    // predicate like `realcol > 90` (integer literal) works. Without this a
+    // REAL-vs-INTEGER comparison falls into the type-mismatch path and the
+    // WHERE filter (now actually evaluated) would wrongly reject every row.
+    bool l_num = (left->type == TYPE_INTEGER || left->type == TYPE_REAL);
+    bool r_num = (right->type == TYPE_INTEGER || right->type == TYPE_REAL);
+    if (l_num && r_num && left->type != right->type) {
+        double l = (left->type == TYPE_INTEGER) ? (double)left->value.integer : left->value.real;
+        double r = (right->type == TYPE_INTEGER) ? (double)right->value.integer : right->value.real;
+        if (l < r) return -1;
+        if (l > r) return 1;
+        return 0;
+    }
+
+    if (left->type != right->type) return -1; // Type mismatch (e.g. TEXT vs number)
+
     switch (left->type) {
         case TYPE_INTEGER:
             if (left->value.integer < right->value.integer) return -1;
@@ -1037,8 +1076,17 @@ static int storage_value_compare(Value* left, Value* right) {
             if (left->value.real < right->value.real) return -1;
             if (left->value.real > right->value.real) return 1;
             return 0;
-        case TYPE_TEXT:
-            return strcmp(left->value.text.data, right->value.text.data);
+        case TYPE_TEXT: {
+            // Guard NULL .data (treat NULL as a defined ordering, not a crash).
+            // Now reachable: wiring the WHERE filter into the scan makes every
+            // TEXT predicate take this scalar path (SIMD handles INTEGER only).
+            const char* l = left->value.text.data;
+            const char* r = right->value.text.data;
+            if (!l && !r) return 0;
+            if (!l) return -1;
+            if (!r) return 1;
+            return strcmp(l, r);
+        }
         case TYPE_NULL:
             return 0;
         default:
@@ -1046,9 +1094,9 @@ static int storage_value_compare(Value* left, Value* right) {
     }
 }
 
-static bool evaluate_comparison(Expr* expr, Row* row, Table* table) {
-    Value* left_val = evaluate_expr_to_value(expr->data.binary.left, row, table);
-    Value* right_val = evaluate_expr_to_value(expr->data.binary.right, row, table);
+static bool evaluate_comparison(Expr* expr, Row* row, SqlTable* table) {
+    SqlValue* left_val = evaluate_expr_to_value(expr->data.binary.left, row, table);
+    SqlValue* right_val = evaluate_expr_to_value(expr->data.binary.right, row, table);
     
     if (!left_val || !right_val) {
         storage_value_destroy(left_val);
@@ -1074,12 +1122,12 @@ static bool evaluate_comparison(Expr* expr, Row* row, Table* table) {
     return result;
 }
 
-static Value* evaluate_expr_to_value(Expr* expr, Row* row, Table* table) {
+static SqlValue* evaluate_expr_to_value(Expr* expr, Row* row, SqlTable* table) {
     if (!expr) return NULL;
     
     switch (expr->type) {
         case EXPR_LITERAL: {
-            Value* val = malloc(sizeof(Value));
+            SqlValue* val = malloc(sizeof(SqlValue));
             if (val) {
                 *val = expr->data.literal;
                 // For text values, make a copy of the string
@@ -1110,7 +1158,7 @@ static Value* evaluate_expr_to_value(Expr* expr, Row* row, Table* table) {
     }
 }
 
-bool evaluate_expr(Expr* expr, Row* row, Table* table) {
+bool evaluate_expr(Expr* expr, Row* row, SqlTable* table) {
     if (!expr) return true; // No filter means include all rows
     
     switch (expr->type) {
@@ -1130,7 +1178,7 @@ bool evaluate_expr(Expr* expr, Row* row, Table* table) {
             
             if (col_idx == -1) return false; // Column not found
             
-            Value* val = storage_row_get_value(row, table, col_idx);
+            SqlValue* val = storage_row_get_value(row, table, col_idx);
             bool result = (val && val->type != TYPE_NULL);
             storage_value_destroy(val);
             return result;

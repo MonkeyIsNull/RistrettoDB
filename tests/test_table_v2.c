@@ -312,10 +312,71 @@ bool test_file_growth(void) {
     return grew;
 }
 
+// #6 - table_append_row_n rejects a wrong value count and writes nothing.
+bool test_append_row_count_guard(void) {
+    table_close(table_create("guard", "CREATE TABLE guard (a INTEGER, b INTEGER, c INTEGER)"));
+    Table *t = table_open("guard");
+    if (!t) return false;
+
+    Value vals[3] = { value_integer(1), value_integer(2), value_integer(3) };
+    bool ok = true;
+    // Too few / too many must fail and not change the row count.
+    ok &= (table_append_row_n(t, vals, 2) == false);
+    ok &= (table_append_row_n(t, vals, 4) == false);
+    ok &= (table_get_row_count(t) == 0);
+    // Correct count succeeds.
+    ok &= (table_append_row_n(t, vals, 3) == true);
+    ok &= (table_get_row_count(t) == 1);
+    table_close(t);
+    return ok;
+}
+
+// #5 - RDB_CREATE_NEW refuses to clobber an existing file; a custom base_dir
+// is created and the .rdb lands there.
+bool test_create_modes_and_basedir(void) {
+    bool ok = true;
+    Table *t = table_create_ex("modes", "CREATE TABLE modes (id INTEGER)",
+                               "data", RDB_CREATE_NEW);
+    ok &= (t != NULL);
+    if (t) table_close(t);
+    // Second CREATE_NEW on the now-existing file must fail.
+    Table *dup = table_create_ex("modes", "CREATE TABLE modes (id INTEGER)",
+                                 "data", RDB_CREATE_NEW);
+    ok &= (dup == NULL);
+    if (dup) table_close(dup);
+
+    // Custom base_dir is created and used.
+    system("rm -rf data_alt");
+    Table *c = table_create_ex("custom", "CREATE TABLE custom (id INTEGER)",
+                               "data_alt", RDB_CREATE_OR_TRUNCATE);
+    ok &= (c != NULL);
+    if (c) table_close(c);
+    struct stat st;
+    ok &= (stat("data_alt/custom.rdb", &st) == 0);
+    system("rm -rf data_alt");
+    return ok;
+}
+
+// #8 - advisory flock: a second open of the same live table returns NULL.
+bool test_flock_second_open(void) {
+    table_close(table_create("locked", "CREATE TABLE locked (id INTEGER)"));
+    Table *a = table_open("locked");
+    if (!a) return false;
+    Table *b = table_open("locked"); // distinct handle, same file, a still open
+    bool ok = (b == NULL);
+    if (b) table_close(b);
+    table_close(a);
+    // After release, open succeeds again.
+    Table *c = table_open("locked");
+    ok &= (c != NULL);
+    if (c) table_close(c);
+    return ok;
+}
+
 int main(void) {
     printf("RistrettoDB Table V2 Test Suite\n");
     printf("===============================\n\n");
-    
+
     TEST(schema_parsing);
     TEST(value_utilities);
     TEST(table_creation);
@@ -324,6 +385,9 @@ int main(void) {
     TEST(table_selection);
     TEST(file_growth);
     TEST(performance);
+    TEST(append_row_count_guard);
+    TEST(create_modes_and_basedir);
+    TEST(flock_second_open);
     
     printf("\n===============================\n");
     printf("Tests passed: %d/%d\n", tests_passed, tests_run);

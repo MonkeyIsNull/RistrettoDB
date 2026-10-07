@@ -5,7 +5,7 @@
 ** which are mapped by the compatibility layer in ristretto.h.
 **
 ** To compile and run:
-**   make lib                    # Build the libraries first
+**   make libraries              # Build the libraries first
 **   gcc -O3 -o simple_embed_compat examples/simple_embed_compat.c -Llib -lristretto
 **   ./simple_embed_compat
 */

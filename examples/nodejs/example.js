@@ -7,7 +7,7 @@
  * 
  * Requirements:
  *   - Node.js 12+
- *   - RistrettoDB library built (run: cd ../../ && make lib)
+ *   - RistrettoDB library built (run: cd ../../ && make libraries)
  *   - Dependencies installed (run: npm install)
  * 
  * Usage:
@@ -160,8 +160,22 @@ function tableV2ApiExample() {
     console.log('   - Conversion funnel analysis');
     console.log('   - Real-time dashboard feeds');
 
+    if (table.getRowCount() !== successfulInserts) {
+      throw new Error('row count does not match inserts');
+    }
+
     // Clean up
     table.close();
+
+    // Reopen and confirm the rows persisted across close/open.
+    const reopened = RistrettoTable.open('analytics_data');
+    if (reopened.getRowCount() !== successfulInserts) {
+      reopened.close();
+      throw new Error(`after reopen expected ${successfulInserts} rows, got ${reopened.getRowCount()}`);
+    }
+    console.log(`[SUCCESS] Reopened table, ${reopened.getRowCount()} rows persisted`);
+    reopened.close();
+
     console.log('[SUCCESS] Table V2 ultra-fast API example completed successfully!\\n');
     return true;
 
@@ -198,16 +212,16 @@ function integrationExamples() {
   });
 
   console.log('\\n[INSTALLATION] Installation:');
-  console.log('   1. Build RistrettoDB: cd ../../ && make lib');
+  console.log('   1. Build RistrettoDB: cd ../../ && make libraries');
   console.log('   2. Install dependencies: npm install');
   console.log('   3. Copy bindings to your project');
-  console.log('   4. const { RistrettoDB } = require(\\'./ristretto\\');');
+  console.log("   4. const { RistrettoDB } = require('./ristretto');");
 
   console.log('\\n[PERFORMANCE] Performance Benefits:');
   console.log('   - 2.8x faster than SQLite (Original API)');
   console.log('   - 4.57x faster than SQLite (Table V2 API)');
   console.log('   - Async/await compatible');
-  console.log('   - Zero external dependencies');
+  console.log('   - Single dependency: koffi (prebuilt FFI, no native build step)');
   console.log('   - Memory-efficient design');
   console.log('   - Perfect for microservices');
 
@@ -234,7 +248,7 @@ async function main() {
   } catch (error) {
     console.error(`[ERROR] Failed to load RistrettoDB library: ${error.message}`);
     console.log('\\n[INFO] Make sure to build the library first:');
-    console.log('   cd ../../ && make lib');
+    console.log('   cd ../../ && make libraries');
     console.log('\\n[INFO] Install Node.js dependencies:');
     console.log('   npm install');
     return 1;
@@ -255,7 +269,7 @@ async function main() {
     console.log('');
     console.log('[NEXT STEPS] Next Steps:');
     console.log('   - Copy ristretto.js to your project');
-    console.log('   - Install dependencies: npm install ffi-napi ref-napi');
+    console.log('   - Install dependencies: npm install');
     console.log('   - Start building high-performance applications!');
   } else {
     console.log('[WARNING] Some examples failed. Check error messages above.');

@@ -63,7 +63,7 @@ static uint32_t find_child_index(void* node, uint32_t key) {
     return left;
 }
 
-BTree* btree_create(Pager* pager, Table* table) {
+BTree* btree_create(Pager* pager, SqlTable* table) {
     BTree* btree = malloc(sizeof(BTree));
     if (!btree) {
         return NULL;

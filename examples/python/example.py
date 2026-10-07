@@ -7,7 +7,7 @@ Demonstrates both the Original SQL API and Table V2 Ultra-Fast API.
 
 Requirements:
     - Python 3.6+
-    - RistrettoDB library built (run: cd ../../ && make lib)
+    - RistrettoDB library built (run: cd ../../ && make libraries)
 
 Usage:
     python3 example.py
@@ -140,7 +140,19 @@ def table_v2_api_example():
             print(f"   • Memory efficient: Fixed-width row format")
             print(f"   • Zero-copy I/O: Memory-mapped file access")
             print(f"   • Append-only: Optimized for write-heavy workloads")
-    
+
+            if table.get_row_count() != successful_inserts:
+                print("ERROR: row count does not match inserts")
+                return False
+
+        # Reopen the (now closed) table and confirm the rows persisted.
+        with RistrettoTable.open("sensor_data") as reopened:
+            if reopened.get_row_count() != successful_inserts:
+                print(f"ERROR: after reopen expected {successful_inserts} rows, "
+                      f"got {reopened.get_row_count()}")
+                return False
+            print(f"SUCCESS: Reopened table, {reopened.get_row_count()} rows persisted")
+
     except RistrettoError as e:
         print(f"ERROR: Table error: {e}")
         return False
@@ -174,7 +186,7 @@ def integration_examples():
         print(f"     └─ {description}")
     
     print("\nInstallation:")
-    print("   1. Build RistrettoDB: cd ../../ && make lib")
+    print("   1. Build RistrettoDB: cd ../../ && make libraries")
     print("   2. Copy bindings: cp examples/python/ristretto.py your_project/")
     print("   3. Use in your code: from ristretto import RistrettoDB")
     
@@ -201,7 +213,7 @@ def main():
     except Exception as e:
         print(f"ERROR: Failed to load RistrettoDB library: {e}")
         print("\nMake sure to build the library first:")
-        print("   cd ../../ && make lib")
+        print("   cd ../../ && make libraries")
         return 1
     
     # Run examples

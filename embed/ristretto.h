@@ -21,6 +21,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <assert.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -105,8 +106,8 @@ const char* ristretto_error_string(RistrettoResult result);
 ** Constants for Table V2 API
 */
 #define RISTRETTO_MAX_COLUMNS 14
-#define RISTRETTO_MAX_COLUMN_NAME 8
-#define RISTRETTO_TABLE_HEADER_SIZE 256
+#define RISTRETTO_MAX_COLUMN_NAME 32                // must match internal MAX_COLUMN_NAME
+#define RISTRETTO_TABLE_HEADER_SIZE 1024            // must match internal TABLE_HEADER_SIZE
 #define RISTRETTO_INITIAL_FILE_SIZE (1024 * 1024)  // 1 MB initial size
 #define RISTRETTO_GROWTH_FACTOR 2                   // Double size when growing
 #define RISTRETTO_SYNC_INTERVAL_ROWS 512           // Sync every N rows
@@ -116,7 +117,16 @@ const char* ristretto_error_string(RistrettoResult result);
 ** Magic bytes for file format identification
 */
 #define RISTRETTO_TABLE_MAGIC "RSTRDB\x00\x00"
-#define RISTRETTO_TABLE_VERSION 1
+#define RISTRETTO_TABLE_VERSION 2                   // format v2 (1024-byte header)
+
+/*
+** Open modes for ristretto_table_create_ex / ristretto_table_open_ex.
+*/
+typedef enum {
+    RISTRETTO_CREATE_NEW = 0,          // Create; fail if the file already exists
+    RISTRETTO_CREATE_OR_TRUNCATE = 1,  // Create or truncate existing (legacy default)
+    RISTRETTO_OPEN_OR_CREATE = 2       // Open existing, or create if absent
+} RistrettoOpenMode;
 
 /*
 ** Column data types
@@ -152,6 +162,10 @@ typedef struct {
     RistrettoColumnDesc columns[RISTRETTO_MAX_COLUMNS];  // Column descriptors
 } RistrettoTableHeader;
 
+/* Row data must never overlap the header region (mirrors the internal check). */
+_Static_assert(RISTRETTO_TABLE_HEADER_SIZE >= sizeof(RistrettoTableHeader),
+               "row data must not overlap the table header");
+
 /*
 ** Table handle - opaque structure
 */
@@ -181,16 +195,33 @@ RistrettoTable* ristretto_table_open(const char *name);
 void ristretto_table_close(RistrettoTable *table);
 
 /*
+** Extended lifecycle: choose the storage directory (base_dir, NULL = "data")
+** and, for create, the open mode (a RistrettoOpenMode value). The plain
+** create/open above are wrappers with base_dir="data" and, for create,
+** RISTRETTO_CREATE_OR_TRUNCATE.
+*/
+RistrettoTable* ristretto_table_create_ex(const char *name, const char *schema_sql,
+                                          const char *base_dir, int open_mode);
+RistrettoTable* ristretto_table_open_ex(const char *name, const char *base_dir);
+
+/*
 ** Core table operations
+**
+** ristretto_table_append_row trusts that values[] holds exactly column_count
+** entries; ristretto_table_append_row_n validates the count first and is the
+** recommended entry point for language bindings and untrusted callers.
 */
 bool ristretto_table_append_row(RistrettoTable *table, const RistrettoValue *values);
+bool ristretto_table_append_row_n(RistrettoTable *table, const RistrettoValue *values,
+                                  uint32_t value_count);
 bool ristretto_table_select(RistrettoTable *table, const char *where_clause,
                            void (*callback)(void *ctx, const RistrettoValue *row), void *ctx);
 
 /*
 ** File management
 */
-bool ristretto_table_flush(RistrettoTable *table);
+bool ristretto_table_flush(RistrettoTable *table);         // MS_ASYNC (fast)
+bool ristretto_table_flush_durable(RistrettoTable *table); // MS_SYNC + fsync (durable)
 bool ristretto_table_remap(RistrettoTable *table);
 bool ristretto_table_ensure_space(RistrettoTable *table, size_t needed_bytes);
 
@@ -266,10 +297,14 @@ bool ristretto_create_data_directory(void);
 
 #define table_create                 ristretto_table_create
 #define table_open                   ristretto_table_open
+#define table_create_ex              ristretto_table_create_ex
+#define table_open_ex                ristretto_table_open_ex
 #define table_close                  ristretto_table_close
 #define table_append_row             ristretto_table_append_row
+#define table_append_row_n           ristretto_table_append_row_n
 #define table_select                 ristretto_table_select
 #define table_flush                  ristretto_table_flush
+#define table_flush_durable          ristretto_table_flush_durable
 #define table_remap                  ristretto_table_remap
 #define table_ensure_space           ristretto_table_ensure_space
 #define table_parse_schema           ristretto_table_parse_schema

@@ -1,3 +1,6 @@
+#if !defined(_DEFAULT_SOURCE)
+#define _DEFAULT_SOURCE 1
+#endif
 /*
 ** RistrettoDB Embedded
 **
@@ -39,6 +42,18 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <assert.h>
+
+/*
+** Pre-define the internal headers' include guards whose bodies would otherwise
+** redeclare the public SQL symbols defined below (db.h declares RistrettoDB,
+** RistrettoResult, RistrettoCallback and the ristretto_* SQL prototypes). The
+** inlined copies carry their own guards, so defining these here makes the
+** compiler skip the inlined bodies and keeps the single public definition.
+*/
+#ifndef RISTRETTO_DB_H
+#define RISTRETTO_DB_H
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -80,17 +95,17 @@ RistrettoResult ristretto_query(RistrettoDB* db, const char* sql, RistrettoCallb
 const char* ristretto_error_string(RistrettoResult result);
 
 /*
-** Table V2 API Constants
+** Table V2 API Constants (must match the internal table_v2.h values)
 */
 #define RISTRETTO_MAX_COLUMNS 14
-#define RISTRETTO_MAX_COLUMN_NAME 8
-#define RISTRETTO_TABLE_HEADER_SIZE 256
+#define RISTRETTO_MAX_COLUMN_NAME 32
+#define RISTRETTO_TABLE_HEADER_SIZE 1024
 #define RISTRETTO_INITIAL_FILE_SIZE (1024 * 1024)
 #define RISTRETTO_GROWTH_FACTOR 2
 #define RISTRETTO_SYNC_INTERVAL_ROWS 512
 #define RISTRETTO_SYNC_INTERVAL_MS 100
 #define RISTRETTO_TABLE_MAGIC "RSTRDB\x00\x00"
-#define RISTRETTO_TABLE_VERSION 1
+#define RISTRETTO_TABLE_VERSION 2
 
 typedef enum {
     RISTRETTO_COL_INTEGER = 1,
@@ -98,6 +113,12 @@ typedef enum {
     RISTRETTO_COL_TEXT = 3,
     RISTRETTO_COL_NULLABLE = 4
 } RistrettoColumnType;
+
+typedef enum {
+    RISTRETTO_CREATE_NEW = 0,
+    RISTRETTO_CREATE_OR_TRUNCATE = 1,
+    RISTRETTO_OPEN_OR_CREATE = 2
+} RistrettoOpenMode;
 
 typedef struct RistrettoTable RistrettoTable;
 
@@ -122,18 +143,43 @@ typedef struct {
     uint8_t reserved[4];
 } RistrettoColumnDesc;
 
+typedef struct {
+    char magic[8];
+    uint32_t version;
+    uint32_t row_size;
+    uint64_t num_rows;
+    uint32_t column_count;
+    uint8_t reserved[12];
+    RistrettoColumnDesc columns[RISTRETTO_MAX_COLUMNS];
+} RistrettoTableHeader;
+
+_Static_assert(RISTRETTO_TABLE_HEADER_SIZE >= sizeof(RistrettoTableHeader),
+               "row data must not overlap the table header");
+
 /*
 ** Table V2 API Functions
 */
 RistrettoTable* ristretto_table_create(const char *name, const char *schema_sql);
 RistrettoTable* ristretto_table_open(const char *name);
+RistrettoTable* ristretto_table_create_ex(const char *name, const char *schema_sql,
+                                          const char *base_dir, int open_mode);
+RistrettoTable* ristretto_table_open_ex(const char *name, const char *base_dir);
 void ristretto_table_close(RistrettoTable *table);
 
 bool ristretto_table_append_row(RistrettoTable *table, const RistrettoValue *values);
+bool ristretto_table_append_row_n(RistrettoTable *table, const RistrettoValue *values,
+                                  uint32_t value_count);
 bool ristretto_table_select(RistrettoTable *table, const char *where_clause,
                            void (*callback)(void *ctx, const RistrettoValue *row), void *ctx);
 
 bool ristretto_table_flush(RistrettoTable *table);
+bool ristretto_table_flush_durable(RistrettoTable *table);
+bool ristretto_table_remap(RistrettoTable *table);
+bool ristretto_table_ensure_space(RistrettoTable *table, size_t needed_bytes);
+
+bool ristretto_table_parse_schema(const char *schema_sql, RistrettoColumnDesc *columns,
+                                 uint32_t *column_count, uint32_t *row_size);
+const RistrettoColumnDesc* ristretto_table_get_column(RistrettoTable *table, const char *name);
 size_t ristretto_table_get_row_count(RistrettoTable *table);
 
 RistrettoValue ristretto_value_integer(int64_t val);
@@ -142,41 +188,19 @@ RistrettoValue ristretto_value_text(const char *str);
 RistrettoValue ristretto_value_null(void);
 void ristretto_value_destroy(RistrettoValue *value);
 
+bool ristretto_table_pack_row(RistrettoTable *table, const RistrettoValue *values, uint8_t *row_buffer);
+bool ristretto_table_unpack_row(RistrettoTable *table, const uint8_t *row_buffer, RistrettoValue *values);
+
+uint64_t ristretto_get_time_ms(void);
+bool ristretto_create_data_directory(void);
+
 /*
-** Compatibility layer (when using embedded)
+** NOTE: The amalgamation deliberately omits the user-facing compatibility
+** macros (#define table_create ristretto_table_create, #define Value
+** RistrettoValue, ...). In a single translation unit they would rewrite the
+** inlined internal engine bodies (which define Value / table_create / ...) and
+** collide. Embedding code should call the ristretto_*-prefixed API directly.
 */
-#define RistrettoDB                  RistrettoDB
-#define RistrettoResult              RistrettoResult
-#define RistrettoCallback            RistrettoCallback
-#define ristretto_open               ristretto_open
-#define ristretto_close              ristretto_close
-#define ristretto_exec               ristretto_exec
-#define ristretto_query              ristretto_query
-#define ristretto_error_string       ristretto_error_string
-
-#define Table                        RistrettoTable
-#define Value                        RistrettoValue
-#define ColumnDesc                   RistrettoColumnDesc
-#define ColumnType                   RistrettoColumnType
-#define COL_TYPE_INTEGER             RISTRETTO_COL_INTEGER
-#define COL_TYPE_REAL                RISTRETTO_COL_REAL
-#define COL_TYPE_TEXT                RISTRETTO_COL_TEXT
-#define COL_TYPE_NULLABLE            RISTRETTO_COL_NULLABLE
-#define MAX_COLUMNS                  RISTRETTO_MAX_COLUMNS
-#define MAX_COLUMN_NAME              RISTRETTO_MAX_COLUMN_NAME
-
-#define table_create                 ristretto_table_create
-#define table_open                   ristretto_table_open
-#define table_close                  ristretto_table_close
-#define table_append_row             ristretto_table_append_row
-#define table_select                 ristretto_table_select
-#define table_flush                  ristretto_table_flush
-#define table_get_row_count          ristretto_table_get_row_count
-#define value_integer                ristretto_value_integer
-#define value_real                   ristretto_value_real
-#define value_text                   ristretto_value_text
-#define value_null                   ristretto_value_null
-#define value_destroy                ristretto_value_destroy
 
 #ifdef __cplusplus
 }
@@ -194,8 +218,10 @@ void ristretto_value_destroy(RistrettoValue *value);
 #include <stddef.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <ctype.h>
 #include <time.h>
 #include <sys/mman.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -224,6 +250,7 @@ const char* ristretto_version(void) {
 int ristretto_version_number(void) {
     return RISTRETTO_VERSION_NUMBER;
 }
+
 /* END src/version.c */
 
 /* BEGIN src/util.c */
@@ -456,8 +483,18 @@ void* pager_get_page(Pager* pager, uint32_t page_num) {
             size_t new_size = (page_num + 1) * PAGE_SIZE;
             mapped_file_resize(pager->file, new_size);
             pager->num_pages = page_num + 1;
+
+            // mapped_file_resize munmaps and re-mmaps, so file->data may now
+            // point at a different address. Every previously cached page
+            // pointer (pager->pages[*] = old file->data + offset) is now a
+            // dangling pointer into the unmapped region. Invalidate the whole
+            // cache so each page is recomputed against the new mapping. The
+            // cache holds read-through pointers only (writes land directly in
+            // the shared mmap, and pager_sync msyncs the whole mapping), so
+            // clearing it loses no data.
+            memset(pager->pages, 0, sizeof(pager->pages));
         }
-        
+
         size_t offset = page_num * PAGE_SIZE;
         pager->pages[page_num] = pager->file->data + offset;
         
@@ -507,6 +544,9 @@ uint32_t pager_allocate_page(Pager* pager) {
 #define RISTRETTO_STORAGE_H
 
 
+// Forward declaration for BTree
+struct BTree;
+
 typedef enum {
     TYPE_NULL = 0,
     TYPE_INTEGER = 1,
@@ -524,7 +564,7 @@ typedef struct {
             size_t len;
         } text;
     } value;
-} Value;
+} SqlValue;
 
 typedef struct {
     char name[32];
@@ -541,7 +581,8 @@ typedef struct {
     uint32_t root_page;
     uint32_t row_count;
     uint32_t next_row_id;
-} Table;
+    struct BTree *primary_index; // B-tree index on first INTEGER column (if exists)
+} SqlTable;
 
 typedef struct {
     uint32_t page_id;
@@ -553,25 +594,25 @@ typedef struct {
     size_t size;
 } Row;
 
-Table* storage_table_create(const char *name);
-void storage_table_destroy(Table *table);
+SqlTable* storage_table_create(const char *name);
+void storage_table_destroy(SqlTable *table);
 
-void storage_table_add_column(Table *table, const char *name, DataType type);
+void storage_table_add_column(SqlTable *table, const char *name, DataType type);
 
-Row* storage_row_create(Table *table);
+Row* storage_row_create(SqlTable *table);
 void storage_row_destroy(Row *row);
 
-void storage_row_set_value(Row *row, Table *table, uint32_t col_index, Value *value);
-Value* storage_row_get_value(Row *row, Table *table, uint32_t col_index);
-void storage_value_destroy(Value *value);
+void storage_row_set_value(Row *row, SqlTable *table, uint32_t col_index, SqlValue *value);
+SqlValue* storage_row_get_value(Row *row, SqlTable *table, uint32_t col_index);
+void storage_value_destroy(SqlValue *value);
 
-// Table storage operations
-RowId table_insert_row(Table *table, Pager *pager, Row *row);
-Row* table_get_row(Table *table, Pager *pager, RowId row_id);
+// SqlTable storage operations
+RowId table_insert_row(SqlTable *table, Pager *pager, Row *row);
+Row* table_get_row(SqlTable *table, Pager *pager, RowId row_id);
 
-// Table scanning
+// SqlTable scanning
 typedef struct {
-    Table *table;
+    SqlTable *table;
     Pager *pager;
     uint32_t current_page;
     uint32_t current_offset;
@@ -579,7 +620,7 @@ typedef struct {
     bool at_end;
 } TableScanner;
 
-TableScanner* table_scanner_create(Table *table, Pager *pager);
+TableScanner* table_scanner_create(SqlTable *table, Pager *pager);
 void table_scanner_destroy(TableScanner *scanner);
 Row* table_scanner_next(TableScanner *scanner);
 bool table_scanner_at_end(TableScanner *scanner);
@@ -603,13 +644,13 @@ typedef struct {
     } ptrs;
 } BTreeNode;
 
-typedef struct {
+typedef struct BTree {
     Pager *pager;
     uint32_t root_page;
-    Table *table;
+    SqlTable *table;
 } BTree;
 
-BTree* btree_create(Pager *pager, Table *table);
+BTree* btree_create(Pager *pager, SqlTable *table);
 void btree_destroy(BTree *btree);
 
 bool btree_insert(BTree *btree, uint32_t key, RowId value);
@@ -659,7 +700,7 @@ static uint32_t* get_node_keys(void* node) {
 }
 
 static uint32_t* get_internal_node_children(void* node) {
-    NodeHeader* header = get_node_header(node);
+    (void)node; // Suppress unused parameter warning if header not needed
     return (uint32_t*)((uint8_t*)node + sizeof(NodeHeader) + 
                        sizeof(uint32_t) * (BTREE_ORDER - 1));
 }
@@ -696,7 +737,7 @@ static uint32_t find_child_index(void* node, uint32_t key) {
     return left;
 }
 
-BTree* btree_create(Pager* pager, Table* table) {
+BTree* btree_create(Pager* pager, SqlTable* table) {
     BTree* btree = malloc(sizeof(BTree));
     if (!btree) {
         return NULL;
@@ -721,6 +762,7 @@ void btree_destroy(BTree* btree) {
 }
 
 static bool leaf_node_insert(BTree* btree, void* node, uint32_t key, RowId value) {
+    (void)btree; // Suppress unused parameter warning
     NodeHeader* header = get_node_header(node);
     uint32_t* keys = get_node_keys(node);
     RowId* values = get_leaf_node_values(node);
@@ -858,6 +900,7 @@ RowId btree_cursor_value(BTreeCursor* cursor) {
     RowId* values = get_leaf_node_values(node);
     return values[cursor->cell_num];
 }
+
 /* END src/btree.c */
 
 /* BEGIN src/storage.c */
@@ -884,8 +927,8 @@ static size_t align_offset(size_t offset) {
     return (offset + ALIGN_SIZE - 1) & ~(ALIGN_SIZE - 1);
 }
 
-Table* storage_table_create(const char* name) {
-    Table* table = malloc(sizeof(Table));
+SqlTable* storage_table_create(const char* name) {
+    SqlTable* table = malloc(sizeof(SqlTable));
     if (!table) {
         return NULL;
     }
@@ -899,20 +942,26 @@ Table* storage_table_create(const char* name) {
     table->root_page = 0;
     table->row_count = 0;
     table->next_row_id = 1;
+    table->primary_index = NULL; // Will be created when first INTEGER column is added
     
     return table;
 }
 
-void storage_table_destroy(Table* table) {
+void storage_table_destroy(SqlTable* table) {
     if (!table) {
         return;
+    }
+    
+    // Clean up index if it exists
+    if (table->primary_index) {
+        btree_destroy(table->primary_index);
     }
     
     free(table->columns);
     free(table);
 }
 
-void storage_table_add_column(Table* table, const char* name, DataType type) {
+void storage_table_add_column(SqlTable* table, const char* name, DataType type) {
     uint32_t new_count = table->column_count + 1;
     Column* new_columns = realloc(table->columns, new_count * sizeof(Column));
     if (!new_columns) {
@@ -933,7 +982,7 @@ void storage_table_add_column(Table* table, const char* name, DataType type) {
     table->column_count = new_count;
 }
 
-Row* storage_row_create(Table* table) {
+Row* storage_row_create(SqlTable* table) {
     Row* row = malloc(sizeof(Row));
     if (!row) {
         return NULL;
@@ -958,7 +1007,12 @@ void storage_row_destroy(Row* row) {
     free(row);
 }
 
-void storage_row_set_value(Row* row, Table* table, uint32_t col_index, Value* value) {
+void storage_row_set_value(Row* row, SqlTable* table, uint32_t col_index, SqlValue* value) {
+    // Defensive: validate all parameters
+    if (!row || !table || !value || !row->data || !table->columns) {
+        return;
+    }
+    
     if (col_index >= table->column_count) {
         return;
     }
@@ -995,19 +1049,26 @@ void storage_row_set_value(Row* row, Table* table, uint32_t col_index, Value* va
     }
 }
 
-Value* storage_row_get_value(Row* row, Table* table, uint32_t col_index) {
-    if (col_index >= table->column_count) {
+SqlValue* storage_row_get_value(Row* row, SqlTable* table, uint32_t col_index) {
+    // Add comprehensive null checks
+    if (!row || !table || !row->data || col_index >= table->column_count) {
         return NULL;
     }
     
-    Value* value = malloc(sizeof(Value));
+    SqlValue* value = malloc(sizeof(SqlValue));
     if (!value) {
         return NULL;
     }
     
     Column* col = &table->columns[col_index];
-    uint8_t* src = row->data + col->offset;
     
+    // Ensure we don't read past row data bounds
+    if (col->offset + col->size > row->size) {
+        free(value);
+        return NULL;
+    }
+    
+    uint8_t* src = row->data + col->offset;
     value->type = col->type;
     
     switch (col->type) {
@@ -1015,26 +1076,58 @@ Value* storage_row_get_value(Row* row, Table* table, uint32_t col_index) {
             break;
             
         case TYPE_INTEGER:
-            memcpy(&value->value.integer, src, sizeof(int64_t));
+            if (col->size >= sizeof(int64_t)) {
+                memcpy(&value->value.integer, src, sizeof(int64_t));
+            } else {
+                value->value.integer = 0;
+            }
             break;
             
         case TYPE_REAL:
-            memcpy(&value->value.real, src, sizeof(double));
-            break;
-            
-        case TYPE_TEXT:
-            value->value.text.len = strlen((char*)src);
-            value->value.text.data = malloc(value->value.text.len + 1);
-            if (value->value.text.data) {
-                strcpy(value->value.text.data, (char*)src);
+            if (col->size >= sizeof(double)) {
+                memcpy(&value->value.real, src, sizeof(double));
+            } else {
+                value->value.real = 0.0;
             }
             break;
+            
+        case TYPE_TEXT: {
+            // CRITICAL FIX: Safe TEXT handling with bounds checking
+            char* text_src = (char*)src;
+            size_t max_len = col->size > 0 ? col->size - 1 : 0; // Reserve space for null terminator
+            size_t actual_len = 0;
+            
+            // Find actual string length up to max_len, ensuring null termination
+            for (size_t i = 0; i < max_len; i++) {
+                if (text_src[i] == '\0') {
+                    actual_len = i;
+                    break;
+                }
+                actual_len = i + 1;
+            }
+            
+            value->value.text.len = actual_len;
+            value->value.text.data = malloc(actual_len + 1);
+            if (value->value.text.data) {
+                if (actual_len > 0) {
+                    memcpy(value->value.text.data, text_src, actual_len);
+                }
+                value->value.text.data[actual_len] = '\0'; // Ensure null termination
+            } else {
+                free(value);
+                return NULL;
+            }
+            break;
+        }
+        default:
+            free(value);
+            return NULL;
     }
     
     return value;
 }
 
-void storage_value_destroy(Value* value) {
+void storage_value_destroy(SqlValue* value) {
     if (!value) {
         return;
     }
@@ -1055,7 +1148,7 @@ typedef struct {
 
 #define ROWS_PER_PAGE ((PAGE_SIZE - sizeof(PageHeader)) / sizeof(uint32_t))
 
-RowId table_insert_row(Table *table, Pager *pager, Row *row) {
+RowId table_insert_row(SqlTable *table, Pager *pager, Row *row) {
     // Simple implementation: always append to the last page
     if (table->root_page == 0) {
         table->root_page = pager_allocate_page(pager);
@@ -1085,7 +1178,7 @@ RowId table_insert_row(Table *table, Pager *pager, Row *row) {
     return row_id;
 }
 
-Row* table_get_row(Table *table, Pager *pager, RowId row_id) {
+Row* table_get_row(SqlTable *table, Pager *pager, RowId row_id) {
     void* page = pager_get_page(pager, row_id.page_id);
     if (!page) return NULL;
     
@@ -1106,7 +1199,7 @@ Row* table_get_row(Table *table, Pager *pager, RowId row_id) {
 }
 
 
-TableScanner* table_scanner_create(Table *table, Pager *pager) {
+TableScanner* table_scanner_create(SqlTable *table, Pager *pager) {
     TableScanner* scanner = malloc(sizeof(TableScanner));
     if (!scanner) return NULL;
     
@@ -1202,6 +1295,12 @@ void simd_bitmap_or(const uint8_t *a, const uint8_t *b, uint8_t *result, size_t 
 
 size_t simd_count_set_bits(const uint8_t *bitmap, size_t count);
 
+// Fast SIMD functions that automatically choose vectorized or scalar versions
+#ifdef __clang__
+void simd_filter_eq_i32_fast(const int32_t *column, size_t count, int32_t value, uint8_t *bitmap);
+void simd_filter_gt_i32_fast(const int32_t *column, size_t count, int32_t value, uint8_t *bitmap);
+#endif
+
 #endif
 
 /* END simd.h */
@@ -1287,6 +1386,7 @@ size_t simd_count_set_bits(const uint8_t *bitmap, size_t count) {
 void simd_filter_eq_i32_vectorized(const int32_t *column, size_t count, int32_t value, uint8_t *bitmap) {
     size_t vector_count = count / 4;
     size_t remainder = count % 4;
+    (void)remainder; // Suppress unused variable warning - may be used in future implementations
     
     v4i target = {value, value, value, value};
     
@@ -1315,6 +1415,7 @@ void simd_filter_eq_i32_vectorized(const int32_t *column, size_t count, int32_t 
 void simd_filter_gt_i32_vectorized(const int32_t *column, size_t count, int32_t value, uint8_t *bitmap) {
     size_t vector_count = count / 4;
     size_t remainder = count % 4;
+    (void)remainder; // Suppress unused variable warning - may be used in future implementations
     
     v4i target = {value, value, value, value};
     
@@ -1377,6 +1478,7 @@ void simd_filter_gt_i32_fast(const int32_t *column, size_t count, int32_t value,
 }
 
 #endif
+
 /* END src/simd.c */
 
 /* BEGIN src/table_v2.c */
@@ -1386,8 +1488,12 @@ void simd_filter_gt_i32_fast(const int32_t *column, size_t count, int32_t value,
 
 
 #define MAX_COLUMNS 14
-#define MAX_COLUMN_NAME 8
-#define TABLE_HEADER_SIZE 256
+#define MAX_COLUMN_NAME 32
+// Header region reserved at the start of every .rdb file. Must be >= the
+// actual sizeof(TableHeader) (checked by the _Static_assert below) so that
+// row data written at TABLE_HEADER_SIZE never overlaps the column-descriptor
+// array. 1024 leaves generous headroom and is page-friendly.
+#define TABLE_HEADER_SIZE 1024
 #define INITIAL_FILE_SIZE (1024 * 1024)  // 1 MB initial size
 #define GROWTH_FACTOR 2                   // Double size when growing
 #define SYNC_INTERVAL_ROWS 512           // Sync every N rows
@@ -1395,7 +1501,16 @@ void simd_filter_gt_i32_fast(const int32_t *column, size_t count, int32_t value,
 
 // Magic bytes for file format identification
 #define TABLE_MAGIC "RSTRDB\x00\x00"
-#define TABLE_VERSION 1
+// Format version. Bumped 1 -> 2 when TABLE_HEADER_SIZE grew from 256 to 1024:
+// the row-data offset moved, so version-1 files are cleanly rejected on open.
+#define TABLE_VERSION 2
+
+// Open modes for table_create_ex / table_open_ex.
+typedef enum {
+    RDB_CREATE_NEW = 0,          // Create; fail (O_EXCL) if the file exists
+    RDB_CREATE_OR_TRUNCATE = 1,  // Create or truncate existing (legacy default)
+    RDB_OPEN_OR_CREATE = 2       // Open existing, or create if absent
+} RdbOpenMode;
 
 typedef enum {
     COL_TYPE_INTEGER = 1,
@@ -1419,8 +1534,13 @@ typedef struct {
     uint64_t num_rows;           // Number of rows written
     uint32_t column_count;       // Number of columns
     uint8_t reserved[12];        // Reserved for future use
-    ColumnDesc columns[MAX_COLUMNS];  // Column descriptors (224 bytes)
+    ColumnDesc columns[MAX_COLUMNS];  // Column descriptors
 } TableHeader;
+
+// Row data must never overlap the header region. If this fails, raise
+// TABLE_HEADER_SIZE (and bump TABLE_VERSION since the on-disk layout changes).
+_Static_assert(TABLE_HEADER_SIZE >= sizeof(TableHeader),
+               "row data must not overlap the table header");
 
 typedef struct {
     char name[64];               // Table name
@@ -1456,13 +1576,26 @@ Table* table_create(const char *name, const char *schema_sql);
 Table* table_open(const char *name);
 void table_close(Table *table);
 
+// Extended lifecycle: choose the storage directory (base_dir, NULL = "data")
+// and, for create, the open mode (RDB_CREATE_NEW / _OR_TRUNCATE / OPEN_OR_CREATE).
+// The two-argument table_create/table_open above are thin wrappers over these
+// with base_dir="data" and open_mode=RDB_CREATE_OR_TRUNCATE.
+Table* table_create_ex(const char *name, const char *schema_sql,
+                       const char *base_dir, int open_mode);
+Table* table_open_ex(const char *name, const char *base_dir);
+
 // Core operations
+// table_append_row trusts that values[] holds exactly header->column_count
+// entries. table_append_row_n validates the count first (recommended for
+// language bindings and untrusted callers).
 bool table_append_row(Table *table, const Value *values);
-bool table_select(Table *table, const char *where_clause, 
+bool table_append_row_n(Table *table, const Value *values, uint32_t value_count);
+bool table_select(Table *table, const char *where_clause,
                  void (*callback)(void *ctx, const Value *row), void *ctx);
 
 // File management
-bool table_flush(Table *table);
+bool table_flush(Table *table);         // MS_ASYNC (fast, not durable)
+bool table_flush_durable(Table *table); // MS_SYNC + fsync (durable)
 bool table_remap(Table *table);
 bool table_ensure_space(Table *table, size_t needed_bytes);
 
@@ -1485,7 +1618,8 @@ bool table_unpack_row(Table *table, const uint8_t *row_buffer, Value *values);
 
 // Utility functions
 uint64_t get_time_ms(void);
-bool create_data_directory(void);
+bool create_data_directory(void);               // creates "data" in the CWD
+bool create_data_directory_in(const char *base_dir); // creates base_dir (NULL = "data")
 
 #endif
 
@@ -1498,12 +1632,19 @@ uint64_t get_time_ms(void) {
     return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-bool create_data_directory(void) {
+bool create_data_directory_in(const char *base_dir) {
+    if (!base_dir) base_dir = "data";
     struct stat st = {0};
-    if (stat("data", &st) == -1) {
-        return mkdir("data", 0755) == 0;
+    if (stat(base_dir, &st) == -1) {
+        if (mkdir(base_dir, 0755) == 0) return true;
+        // Tolerate a concurrent creator.
+        return errno == EEXIST;
     }
     return true;
+}
+
+bool create_data_directory(void) {
+    return create_data_directory_in("data");
 }
 
 // Value constructors
@@ -1628,15 +1769,19 @@ bool table_parse_schema(const char *schema_sql, ColumnDesc *columns,
     return *column_count > 0;
 }
 
-// Table creation
-Table* table_create(const char *name, const char *schema_sql) {
-    if (!create_data_directory()) {
+// Table creation (extended)
+Table* table_create_ex(const char *name, const char *schema_sql,
+                       const char *base_dir, int open_mode) {
+    if (!name || !schema_sql) return NULL;
+    if (!base_dir) base_dir = "data";
+
+    if (!create_data_directory_in(base_dir)) {
         return NULL;
     }
-    
+
     Table *table = calloc(1, sizeof(Table));
     if (!table) return NULL;
-    
+
     // Parse schema into temporary variables
     ColumnDesc temp_columns[MAX_COLUMNS];
     uint32_t temp_column_count, temp_row_size;
@@ -1644,18 +1789,53 @@ Table* table_create(const char *name, const char *schema_sql) {
         free(table);
         return NULL;
     }
-    
+
     // Create file path
-    snprintf(table->file_path, sizeof(table->file_path), "data/%s.rdb", name);
+    snprintf(table->file_path, sizeof(table->file_path), "%s/%s.rdb", base_dir, name);
     strncpy(table->name, name, sizeof(table->name) - 1);
-    
+
+    // RDB_OPEN_OR_CREATE: resume an existing table rather than recreating it.
+    if (open_mode == RDB_OPEN_OR_CREATE) {
+        struct stat existing;
+        if (stat(table->file_path, &existing) == 0 &&
+            existing.st_size >= (off_t)TABLE_HEADER_SIZE) {
+            free(table);
+            return table_open_ex(name, base_dir);
+        }
+    }
+
+    // Select open flags based on the requested mode.
+    int flags = O_CREAT | O_RDWR;
+    switch (open_mode) {
+        case RDB_CREATE_NEW:         flags |= O_EXCL;  break; // fail if exists
+        case RDB_OPEN_OR_CREATE:     /* no O_TRUNC, no O_EXCL */ break;
+        case RDB_CREATE_OR_TRUNCATE:
+        default:                     flags |= O_TRUNC; break;
+    }
+
     // Create and open file
-    table->fd = open(table->file_path, O_CREAT | O_RDWR | O_TRUNC, 0644);
+    table->fd = open(table->file_path, flags, 0644);
     if (table->fd == -1) {
+        if (open_mode == RDB_CREATE_NEW && errno == EEXIST) {
+            fprintf(stderr, "table_create: '%s' already exists (RDB_CREATE_NEW)\n",
+                    table->file_path);
+        }
         free(table);
         return NULL;
     }
-    
+
+    // Advisory single-writer lock. NB: advisory only, and a no-op on some
+    // network filesystems (NFS/SMB); released implicitly on close(fd).
+    if (flock(table->fd, LOCK_EX | LOCK_NB) == -1) {
+        if (errno == EWOULDBLOCK) {
+            fprintf(stderr, "table_create: '%s' locked by another process\n",
+                    table->file_path);
+        }
+        close(table->fd);
+        free(table);
+        return NULL;
+    }
+
     // Set initial file size
     if (ftruncate(table->fd, INITIAL_FILE_SIZE) == -1) {
         close(table->fd);
@@ -1688,26 +1868,47 @@ Table* table_create(const char *name, const char *schema_sql) {
     
     table->rows_since_sync = 0;
     table->last_sync_time_ms = get_time_ms();
-    
+
     return table;
 }
 
-// Table opening
-Table* table_open(const char *name) {
+// Table creation. Convenience wrapper: stores under "data/" and TRUNCATES any
+// existing file. For non-destructive creation use table_create_ex with
+// RDB_CREATE_NEW, and pass a base_dir to control the storage location.
+Table* table_create(const char *name, const char *schema_sql) {
+    return table_create_ex(name, schema_sql, "data", RDB_CREATE_OR_TRUNCATE);
+}
+
+// Table opening (extended)
+Table* table_open_ex(const char *name, const char *base_dir) {
+    if (!name) return NULL;
+    if (!base_dir) base_dir = "data";
+
     Table *table = calloc(1, sizeof(Table));
     if (!table) return NULL;
-    
+
     // Create file path
-    snprintf(table->file_path, sizeof(table->file_path), "data/%s.rdb", name);
+    snprintf(table->file_path, sizeof(table->file_path), "%s/%s.rdb", base_dir, name);
     strncpy(table->name, name, sizeof(table->name) - 1);
-    
+
     // Open existing file
     table->fd = open(table->file_path, O_RDWR);
     if (table->fd == -1) {
         free(table);
         return NULL;
     }
-    
+
+    // Advisory single-writer lock (see table_create_ex).
+    if (flock(table->fd, LOCK_EX | LOCK_NB) == -1) {
+        if (errno == EWOULDBLOCK) {
+            fprintf(stderr, "table_open: '%s' locked by another process\n",
+                    table->file_path);
+        }
+        close(table->fd);
+        free(table);
+        return NULL;
+    }
+
     // Get file size
     struct stat st;
     if (fstat(table->fd, &st) == -1) {
@@ -1747,24 +1948,36 @@ Table* table_open(const char *name) {
     table->write_offset = TABLE_HEADER_SIZE + (table->header->num_rows * table->header->row_size);
     table->rows_since_sync = 0;
     table->last_sync_time_ms = get_time_ms();
-    
+
     return table;
+}
+
+// Table opening. Convenience wrapper: resumes "data/<name>.rdb".
+Table* table_open(const char *name) {
+    return table_open_ex(name, "data");
 }
 
 // Table closing
 void table_close(Table *table) {
     if (!table) return;
-    
-    table_flush(table);
-    
+
+    // Durable flush at close so a reopen sees every committed row (covers the
+    // header region, making num_rows durable). Runs once, before munmap.
+    if (table->mapped_ptr && table->mapped_ptr != MAP_FAILED) {
+        msync(table->mapped_ptr, table->write_offset, MS_SYNC);
+    }
+    if (table->fd != -1) {
+        fsync(table->fd);
+    }
+
     if (table->mapped_ptr && table->mapped_ptr != MAP_FAILED) {
         munmap(table->mapped_ptr, table->mapped_size);
     }
-    
+
     if (table->fd != -1) {
-        close(table->fd);
+        close(table->fd);  // also releases the advisory flock
     }
-    
+
     free(table);
 }
 
@@ -1827,10 +2040,15 @@ bool table_pack_row(Table *table, const Value *values, uint8_t *row_buffer) {
                 break;
                 
             case COL_TYPE_TEXT:
+                // Guard zero-width TEXT: col->length is uint8_t, so col->length-1
+                // would wrap to a huge size_t and defeat the clamp below.
+                if (col->length == 0) {
+                    break;
+                }
                 if (val->value.text.data) {
                     size_t copy_len = val->value.text.length;
-                    if (copy_len > col->length - 1) {
-                        copy_len = col->length - 1;
+                    if (copy_len > (size_t)(col->length - 1)) {
+                        copy_len = (size_t)(col->length - 1);
                     }
                     memcpy(dest, val->value.text.data, copy_len);
                     dest[copy_len] = '\0';
@@ -1883,10 +2101,11 @@ bool table_unpack_row(Table *table, const uint8_t *row_buffer, Value *values) {
     return true;
 }
 
-// Ultra-fast row insertion
+// Ultra-fast row insertion. Trusts that values[] holds exactly
+// header->column_count entries; use table_append_row_n to validate the count.
 bool table_append_row(Table *table, const Value *values) {
-    if (!table || !values) return false;
-    
+    if (!table || !values || table->header->column_count == 0) return false;
+
     // Ensure we have space for the row
     if (!table_ensure_space(table, table->header->row_size)) {
         return false;
@@ -1913,18 +2132,47 @@ bool table_append_row(Table *table, const Value *values) {
     return true;
 }
 
-// Sync and durability
+// Count-checked row insertion. Rejects a values[] array whose length does not
+// match the column count (prevents out-of-bounds reads in table_pack_row).
+bool table_append_row_n(Table *table, const Value *values, uint32_t value_count) {
+    if (!table || !values) return false;
+    if (value_count != table->header->column_count) {
+        fprintf(stderr, "table_append_row_n: expected %u values, got %u\n",
+                table->header->column_count, value_count);
+        return false;
+    }
+    return table_append_row(table, values);
+}
+
+// Sync and durability (fast, asynchronous).
 bool table_flush(Table *table) {
     if (!table || !table->mapped_ptr) return false;
-    
+
     // Sync memory-mapped region
     if (msync(table->mapped_ptr, table->write_offset, MS_ASYNC) == -1) {
         return false;
     }
-    
+
     table->rows_since_sync = 0;
     table->last_sync_time_ms = get_time_ms();
-    
+
+    return true;
+}
+
+// Durable flush: synchronous msync + fsync. Use when the caller needs the data
+// on stable storage; table_close also flushes durably.
+bool table_flush_durable(Table *table) {
+    if (!table || !table->mapped_ptr) return false;
+
+    if (msync(table->mapped_ptr, table->write_offset, MS_SYNC) == -1) {
+        return false;
+    }
+    if (table->fd != -1 && fsync(table->fd) == -1) {
+        return false;
+    }
+
+    table->rows_since_sync = 0;
+    table->last_sync_time_ms = get_time_ms();
     return true;
 }
 
@@ -1985,7 +2233,10 @@ size_t table_get_row_count(Table *table) {
 typedef enum {
     STMT_CREATE_TABLE,
     STMT_INSERT,
-    STMT_SELECT
+    STMT_SELECT,
+    STMT_SHOW_TABLES,
+    STMT_DESCRIBE,
+    STMT_SHOW_CREATE_TABLE
 } StatementType;
 
 typedef enum {
@@ -2001,6 +2252,7 @@ typedef enum {
     OP_LE,
     OP_GT,
     OP_GE,
+    OP_LIKE,   // recognized but not yet evaluable (surfaced as an error)
     OP_AND,
     OP_OR
 } BinaryOp;
@@ -2008,7 +2260,7 @@ typedef enum {
 typedef struct Expr {
     ExprType type;
     union {
-        Value literal;
+        SqlValue literal;
         struct {
             char *table;
             char *column;
@@ -2033,7 +2285,7 @@ typedef struct {
 typedef struct {
     char *table_name;
     uint32_t value_count;
-    Value *values;
+    SqlValue *values;
 } InsertStmt;
 
 typedef struct {
@@ -2043,6 +2295,17 @@ typedef struct {
     Expr *where_clause;
 } SelectStmt;
 
+typedef struct {
+    char *pattern; // Optional LIKE pattern
+} ShowTablesStmt;
+
+typedef struct {
+    char *table_name;
+} DescribeStmt;
+
+typedef struct {
+    char *table_name;
+} ShowCreateTableStmt;
 
 typedef struct {
     StatementType type;
@@ -2050,6 +2313,9 @@ typedef struct {
         CreateTableStmt create_table;
         InsertStmt insert;
         SelectStmt select;
+        ShowTablesStmt show_tables;
+        DescribeStmt describe;
+        ShowCreateTableStmt show_create_table;
     } data;
 } Statement;
 
@@ -2069,6 +2335,15 @@ typedef struct {
 } Scanner;
 
 static void scanner_init(Scanner* scanner, const char* sql) {
+    if (!scanner || !sql) {
+        if (scanner) {
+            scanner->start = NULL;
+            scanner->current = NULL;
+            scanner->length = 0;
+        }
+        return;
+    }
+    
     scanner->start = sql;
     scanner->current = sql;
     scanner->length = strlen(sql);
@@ -2142,9 +2417,9 @@ static char* parse_identifier(Scanner* scanner) {
     return identifier;
 }
 
-static Value* parse_value(Scanner* scanner) {
+static SqlValue* parse_value(Scanner* scanner) {
     skip_whitespace(scanner);
-    Value* value = malloc(sizeof(Value));
+    SqlValue* value = malloc(sizeof(SqlValue));
     if (!value) return NULL;
     
     char c = peek(scanner);
@@ -2332,8 +2607,8 @@ static Statement* parse_insert(Scanner* scanner) {
     do {
         if (stmt->data.insert.value_count >= capacity) {
             capacity = capacity ? capacity * 2 : 4;
-            Value* new_vals = realloc(stmt->data.insert.values,
-                                      capacity * sizeof(Value));
+            SqlValue* new_vals = realloc(stmt->data.insert.values,
+                                      capacity * sizeof(SqlValue));
             if (!new_vals) {
                 statement_destroy(stmt);
                 return NULL;
@@ -2341,7 +2616,7 @@ static Statement* parse_insert(Scanner* scanner) {
             stmt->data.insert.values = new_vals;
         }
         
-        Value* val = parse_value(scanner);
+        SqlValue* val = parse_value(scanner);
         if (!val) {
             statement_destroy(stmt);
             return NULL;
@@ -2360,6 +2635,165 @@ static Statement* parse_insert(Scanner* scanner) {
     return stmt;
 }
 
+// Forward declarations for WHERE clause parsing
+static Expr* parse_where_expression(Scanner* scanner);
+static Expr* parse_or_expression(Scanner* scanner);
+static Expr* parse_and_expression(Scanner* scanner);
+static Expr* parse_comparison(Scanner* scanner);
+static Expr* parse_primary(Scanner* scanner);
+
+static Expr* parse_where_expression(Scanner* scanner) {
+    return parse_or_expression(scanner);
+}
+
+static Expr* parse_or_expression(Scanner* scanner) {
+    Expr* left = parse_and_expression(scanner);
+    if (!left) return NULL;
+    
+    while (match_keyword(scanner, "OR")) {
+        Expr* right = parse_and_expression(scanner);
+        if (!right) {
+            expr_destroy(left);
+            return NULL;
+        }
+        
+        Expr* binary = malloc(sizeof(Expr));
+        if (!binary) {
+            expr_destroy(left);
+            expr_destroy(right);
+            return NULL;
+        }
+        
+        binary->type = EXPR_BINARY_OP;
+        binary->data.binary.op = OP_OR;
+        binary->data.binary.left = left;
+        binary->data.binary.right = right;
+        left = binary;
+    }
+    
+    return left;
+}
+
+static Expr* parse_and_expression(Scanner* scanner) {
+    Expr* left = parse_comparison(scanner);
+    if (!left) return NULL;
+    
+    while (match_keyword(scanner, "AND")) {
+        Expr* right = parse_comparison(scanner);
+        if (!right) {
+            expr_destroy(left);
+            return NULL;
+        }
+        
+        Expr* binary = malloc(sizeof(Expr));
+        if (!binary) {
+            expr_destroy(left);
+            expr_destroy(right);
+            return NULL;
+        }
+        
+        binary->type = EXPR_BINARY_OP;
+        binary->data.binary.op = OP_AND;
+        binary->data.binary.left = left;
+        binary->data.binary.right = right;
+        left = binary;
+    }
+    
+    return left;
+}
+
+static Expr* parse_comparison(Scanner* scanner) {
+    Expr* left = parse_primary(scanner);
+    if (!left) return NULL;
+    
+    BinaryOp op;
+    skip_whitespace(scanner);
+    
+    if (expect_char(scanner, '=')) {
+        op = OP_EQ;
+    } else if (expect_char(scanner, '<')) {
+        if (expect_char(scanner, '=')) {
+            op = OP_LE;
+        } else {
+            op = OP_LT;
+        }
+    } else if (expect_char(scanner, '>')) {
+        if (expect_char(scanner, '=')) {
+            op = OP_GE;
+        } else {
+            op = OP_GT;
+        }
+    } else if (expect_char(scanner, '!') && expect_char(scanner, '=')) {
+        op = OP_NE;
+    } else if (match_keyword(scanner, "LIKE")) {
+        op = OP_LIKE;
+    } else {
+        return left; // No operator, return the primary expression
+    }
+    
+    Expr* right = parse_primary(scanner);
+    if (!right) {
+        expr_destroy(left);
+        return NULL;
+    }
+    
+    Expr* binary = malloc(sizeof(Expr));
+    if (!binary) {
+        expr_destroy(left);
+        expr_destroy(right);
+        return NULL;
+    }
+    
+    binary->type = EXPR_BINARY_OP;
+    binary->data.binary.op = op;
+    binary->data.binary.left = left;
+    binary->data.binary.right = right;
+    
+    return binary;
+}
+
+static Expr* parse_primary(Scanner* scanner) {
+    skip_whitespace(scanner);
+    
+    // Parse parenthesized expression
+    if (expect_char(scanner, '(')) {
+        Expr* expr = parse_where_expression(scanner);
+        if (!expr || !expect_char(scanner, ')')) {
+            expr_destroy(expr);
+            return NULL;
+        }
+        return expr;
+    }
+    
+    // Try to parse as a literal value
+    SqlValue* value = parse_value(scanner);
+    if (value) {
+        Expr* expr = malloc(sizeof(Expr));
+        if (expr) {
+            expr->type = EXPR_LITERAL;
+            expr->data.literal = *value;
+        }
+        free(value);
+        return expr;
+    }
+    
+    // Parse as column reference
+    char* column = parse_identifier(scanner);
+    if (column) {
+        Expr* expr = malloc(sizeof(Expr));
+        if (expr) {
+            expr->type = EXPR_COLUMN;
+            expr->data.column.table = NULL; // Simple column reference
+            expr->data.column.column = column;
+        } else {
+            free(column);
+        }
+        return expr;
+    }
+    
+    return NULL;
+}
+
 static Statement* parse_select(Scanner* scanner) {
     Statement* stmt = malloc(sizeof(Statement));
     if (!stmt) return NULL;
@@ -2373,9 +2807,31 @@ static Statement* parse_select(Scanner* scanner) {
     skip_whitespace(scanner);
     if (peek(scanner) == '*') {
         advance(scanner);
-        stmt->data.select.column_count = 0;
+        stmt->data.select.column_count = UINT32_MAX; // Sentinel for SELECT *
     } else {
-        // TODO: Parse column list
+        // Parse column list
+        size_t capacity = 0;
+        do {
+            if (stmt->data.select.column_count >= capacity) {
+                capacity = capacity ? capacity * 2 : 4;
+                char** new_cols = realloc(stmt->data.select.columns, capacity * sizeof(char*));
+                if (!new_cols) {
+                    statement_destroy(stmt);
+                    return NULL;
+                }
+                stmt->data.select.columns = new_cols;
+            }
+            
+            char* column = parse_identifier(scanner);
+            if (!column) {
+                statement_destroy(stmt);
+                return NULL;
+            }
+            
+            stmt->data.select.columns[stmt->data.select.column_count++] = column;
+            skip_whitespace(scanner);
+            
+        } while (peek(scanner) == ',' && advance(scanner));
     }
     
     if (!match_keyword(scanner, "FROM")) {
@@ -2389,14 +2845,104 @@ static Statement* parse_select(Scanner* scanner) {
         return NULL;
     }
     
-    // TODO: Parse WHERE clause
+    // Parse WHERE clause
+    skip_whitespace(scanner);
+    if (match_keyword(scanner, "WHERE")) {
+        stmt->data.select.where_clause = parse_where_expression(scanner);
+        if (!stmt->data.select.where_clause) {
+            statement_destroy(stmt);
+            return NULL;
+        }
+    }
+    
+    return stmt;
+}
+
+static Statement* parse_show_tables(Scanner* scanner) {
+    Statement* stmt = malloc(sizeof(Statement));
+    if (!stmt) {
+        return NULL;
+    }
+    
+    stmt->type = STMT_SHOW_TABLES;
+    stmt->data.show_tables.pattern = NULL;
+    
+    // Check for LIKE pattern
+    skip_whitespace(scanner);
+    if (match_keyword(scanner, "LIKE")) {
+        skip_whitespace(scanner);
+        // Parse string literal for pattern
+        if (peek(scanner) == '\'' || peek(scanner) == '"') {
+            char quote = advance(scanner);
+            const char* start = scanner->current;
+            while (!is_at_end(scanner) && peek(scanner) != quote) {
+                advance(scanner);
+            }
+            if (peek(scanner) == quote) {
+                size_t len = scanner->current - start;
+                stmt->data.show_tables.pattern = malloc(len + 1);
+                if (stmt->data.show_tables.pattern) {
+                    memcpy(stmt->data.show_tables.pattern, start, len);
+                    stmt->data.show_tables.pattern[len] = '\0';
+                }
+                advance(scanner); // skip closing quote
+            }
+        }
+    }
+    
+    return stmt;
+}
+
+static Statement* parse_describe(Scanner* scanner) {
+    Statement* stmt = malloc(sizeof(Statement));
+    if (!stmt) {
+        return NULL;
+    }
+    
+    stmt->type = STMT_DESCRIBE;
+    stmt->data.describe.table_name = NULL;
+    
+    skip_whitespace(scanner);
+    stmt->data.describe.table_name = parse_identifier(scanner);
+    if (!stmt->data.describe.table_name) {
+        free(stmt);
+        return NULL;
+    }
+    
+    return stmt;
+}
+
+static Statement* parse_show_create_table(Scanner* scanner) {
+    Statement* stmt = malloc(sizeof(Statement));
+    if (!stmt) {
+        return NULL;
+    }
+    
+    stmt->type = STMT_SHOW_CREATE_TABLE;
+    stmt->data.show_create_table.table_name = NULL;
+    
+    skip_whitespace(scanner);
+    stmt->data.show_create_table.table_name = parse_identifier(scanner);
+    if (!stmt->data.show_create_table.table_name) {
+        free(stmt);
+        return NULL;
+    }
     
     return stmt;
 }
 
 Statement* parse_sql(const char* sql) {
+    if (!sql) {
+        return NULL;
+    }
+    
     Scanner scanner;
     scanner_init(&scanner, sql);
+    
+    // Defensive: ensure scanner was initialized properly
+    if (!scanner.start) {
+        return NULL;
+    }
     
     skip_whitespace(&scanner);
     
@@ -2408,6 +2954,16 @@ Statement* parse_sql(const char* sql) {
         return parse_insert(&scanner);
     } else if (match_keyword(&scanner, "SELECT")) {
         return parse_select(&scanner);
+    } else if (match_keyword(&scanner, "SHOW")) {
+        if (match_keyword(&scanner, "TABLES")) {
+            return parse_show_tables(&scanner);
+        } else if (match_keyword(&scanner, "CREATE")) {
+            if (match_keyword(&scanner, "TABLE")) {
+                return parse_show_create_table(&scanner);
+            }
+        }
+    } else if (match_keyword(&scanner, "DESCRIBE") || match_keyword(&scanner, "DESC")) {
+        return parse_describe(&scanner);
     }
     
     return NULL;
@@ -2439,11 +2995,26 @@ void statement_destroy(Statement* stmt) {
             
         case STMT_SELECT:
             free(stmt->data.select.table_name);
-            for (uint32_t i = 0; i < stmt->data.select.column_count; i++) {
-                free(stmt->data.select.columns[i]);
+            // Handle SELECT * case where column_count is UINT32_MAX
+            if (stmt->data.select.column_count != UINT32_MAX && stmt->data.select.columns) {
+                for (uint32_t i = 0; i < stmt->data.select.column_count; i++) {
+                    free(stmt->data.select.columns[i]);
+                }
             }
             free(stmt->data.select.columns);
             expr_destroy(stmt->data.select.where_clause);
+            break;
+            
+        case STMT_SHOW_TABLES:
+            free(stmt->data.show_tables.pattern);
+            break;
+            
+        case STMT_DESCRIBE:
+            free(stmt->data.describe.table_name);
+            break;
+            
+        case STMT_SHOW_CREATE_TABLE:
+            free(stmt->data.show_create_table.table_name);
             break;
     }
     
@@ -2475,6 +3046,7 @@ void expr_destroy(Expr* expr) {
     
     free(expr);
 }
+
 /* END src/parser.c */
 
 /* BEGIN src/query.c */
@@ -2517,12 +3089,15 @@ typedef enum {
     PLAN_TABLE_SCAN,
     PLAN_INDEX_SCAN,
     PLAN_INSERT,
-    PLAN_CREATE_TABLE
+    PLAN_CREATE_TABLE,
+    PLAN_SHOW_TABLES,
+    PLAN_DESCRIBE,
+    PLAN_SHOW_CREATE_TABLE
 } PlanType;
 
 typedef struct QueryPlan {
     PlanType type;
-    Table *table;
+    SqlTable *table;
     union {
         struct {
             Expr *filter;
@@ -2530,12 +3105,21 @@ typedef struct QueryPlan {
             uint32_t column_count;
         } scan;
         struct {
-            Value *values;
+            SqlValue *values;
             uint32_t value_count;
         } insert;
         struct {
             CreateTableStmt *stmt;
         } create_table;
+        struct {
+            char *pattern;
+        } show_tables;
+        struct {
+            char *table_name;
+        } describe;
+        struct {
+            char *table_name;
+        } show_create_table;
     } data;
 } QueryPlan;
 
@@ -2552,7 +3136,7 @@ void plan_destroy(QueryPlan *plan);
 
 RistrettoResult execute_plan(QueryContext *ctx);
 
-bool evaluate_expr(Expr *expr, Row *row, Table *table);
+bool evaluate_expr(Expr *expr, Row *row, SqlTable *table);
 
 #endif
 
@@ -2560,7 +3144,7 @@ bool evaluate_expr(Expr *expr, Row *row, Table *table);
 
 typedef struct {
     char name[64];
-    Table* table;
+    SqlTable* table;
 } TableEntry;
 
 typedef struct {
@@ -2577,8 +3161,15 @@ static TableCatalog* get_catalog(RistrettoDB* db) {
     return &catalog;
 }
 
-static Table* find_table(RistrettoDB* db, const char* name) {
+static SqlTable* find_table(RistrettoDB* db, const char* name) {
+    if (!db || !name) {
+        return NULL;
+    }
+    
     TableCatalog* catalog = get_catalog(db);
+    if (!catalog) {
+        return NULL;
+    }
     
     for (uint32_t i = 0; i < catalog->count; i++) {
         if (strcmp(catalog->entries[i].name, name) == 0) {
@@ -2589,7 +3180,7 @@ static Table* find_table(RistrettoDB* db, const char* name) {
     return NULL;
 }
 
-static bool register_table(RistrettoDB* db, Table* table) {
+static bool register_table(RistrettoDB* db, SqlTable* table) {
     TableCatalog* catalog = get_catalog(db);
     
     if (catalog->count >= catalog->capacity) {
@@ -2608,8 +3199,48 @@ static bool register_table(RistrettoDB* db, Table* table) {
     return true;
 }
 
+// Forward declaration for SIMD-optimized SELECT execution
+static RistrettoResult execute_select_simd(QueryContext* ctx);
+
+// Check if WHERE clause can use primary index (equality on first INTEGER column)
+static bool can_use_primary_index(Expr* filter, SqlTable* table) {
+    if (!filter || !table || table->column_count == 0) {
+        return false;
+    }
+    
+    // Check if first column is INTEGER type
+    if (table->columns[0].type != TYPE_INTEGER) {
+        return false;
+    }
+    
+    // Check if filter is an equality condition on the first column
+    if (filter->type == EXPR_BINARY_OP && filter->data.binary.op == OP_EQ) {
+        Expr* left = filter->data.binary.left;
+        Expr* right = filter->data.binary.right;
+        
+        // Check if one side is the first column and the other is a literal
+        if (left->type == EXPR_COLUMN && right->type == EXPR_LITERAL) {
+            if (strcmp(left->data.column.column, table->columns[0].name) == 0 && 
+                right->data.literal.type == TYPE_INTEGER) {
+                return true;
+            }
+        } else if (right->type == EXPR_COLUMN && left->type == EXPR_LITERAL) {
+            if (strcmp(right->data.column.column, table->columns[0].name) == 0 && 
+                left->data.literal.type == TYPE_INTEGER) {
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
 QueryPlan* plan_statement(Statement* stmt, RistrettoDB* db) {
-    QueryPlan* plan = malloc(sizeof(QueryPlan));
+    if (!stmt || !db) {
+        return NULL;
+    }
+    
+    QueryPlan* plan = calloc(1, sizeof(QueryPlan));
     if (!plan) return NULL;
     
     switch (stmt->type) {
@@ -2631,15 +3262,91 @@ QueryPlan* plan_statement(Statement* stmt, RistrettoDB* db) {
             break;
             
         case STMT_SELECT:
-            plan->type = PLAN_TABLE_SCAN;
             plan->table = find_table(db, stmt->data.select.table_name);
             if (!plan->table) {
                 free(plan);
                 return NULL;
             }
             plan->data.scan.filter = stmt->data.select.where_clause;
-            plan->data.scan.columns = NULL;
-            plan->data.scan.column_count = 0;
+            
+            // Determine if we can use index scan
+            bool can_use_index = false;
+            if (plan->table->primary_index && plan->data.scan.filter) {
+                // Check if WHERE clause has equality condition on first INTEGER column
+                can_use_index = can_use_primary_index(plan->data.scan.filter, plan->table);
+            }
+            
+            plan->type = can_use_index ? PLAN_INDEX_SCAN : PLAN_TABLE_SCAN;
+            
+            // Handle column selection properly
+            if (stmt->data.select.column_count == UINT32_MAX) {
+                // SELECT * - include all columns
+                plan->data.scan.columns = NULL;
+                plan->data.scan.column_count = 0; // 0 means all columns
+            } else {
+                // Specific column list
+                plan->data.scan.column_count = stmt->data.select.column_count;
+                if (plan->data.scan.column_count > 0) {
+                    plan->data.scan.columns = malloc(plan->data.scan.column_count * sizeof(uint32_t));
+                    if (!plan->data.scan.columns) {
+                        free(plan);
+                        return NULL;
+                    }
+                    
+                    // Map column names to indices
+                    for (uint32_t i = 0; i < plan->data.scan.column_count; i++) {
+                        // Defensive: validate statement column array access
+                        if (!stmt->data.select.columns || !stmt->data.select.columns[i]) {
+                            free(plan->data.scan.columns);
+                            free(plan);
+                            return NULL;
+                        }
+                        
+                        int col_idx = -1;
+                        // Defensive: ensure table has columns and columns array exists
+                        if (plan->table->columns && plan->table->column_count > 0) {
+                            for (uint32_t j = 0; j < plan->table->column_count; j++) {
+                                if (strcmp(plan->table->columns[j].name, stmt->data.select.columns[i]) == 0) {
+                                    col_idx = j;
+                                    break;
+                                }
+                            }
+                        }
+                        if (col_idx == -1) {
+                            free(plan->data.scan.columns);
+                            free(plan);
+                            return NULL; // Column not found
+                        }
+                        plan->data.scan.columns[i] = col_idx;
+                    }
+                }
+            }
+            break;
+            
+        case STMT_SHOW_TABLES:
+            plan->type = PLAN_SHOW_TABLES;
+            plan->table = NULL;
+            plan->data.show_tables.pattern = stmt->data.show_tables.pattern;
+            break;
+            
+        case STMT_DESCRIBE:
+            plan->type = PLAN_DESCRIBE;
+            plan->table = find_table(db, stmt->data.describe.table_name);
+            if (!plan->table) {
+                free(plan);
+                return NULL;
+            }
+            plan->data.describe.table_name = stmt->data.describe.table_name;
+            break;
+            
+        case STMT_SHOW_CREATE_TABLE:
+            plan->type = PLAN_SHOW_CREATE_TABLE;
+            plan->table = find_table(db, stmt->data.show_create_table.table_name);
+            if (!plan->table) {
+                free(plan);
+                return NULL;
+            }
+            plan->data.show_create_table.table_name = stmt->data.show_create_table.table_name;
             break;
             
         default:
@@ -2670,6 +3377,18 @@ void plan_destroy(QueryPlan* plan) {
         case PLAN_CREATE_TABLE:
             // CreateTableStmt is owned by the statement, not the plan
             break;
+            
+        case PLAN_SHOW_TABLES:
+            // Pattern is owned by the statement, not the plan
+            break;
+            
+        case PLAN_DESCRIBE:
+            // SqlTable name is owned by the statement, not the plan
+            break;
+            
+        case PLAN_SHOW_CREATE_TABLE:
+            // SqlTable name is owned by the statement, not the plan
+            break;
     }
     
     free(plan);
@@ -2684,7 +3403,7 @@ static RistrettoResult execute_create_table(QueryContext* ctx) {
     }
     
     // Create new table
-    Table* table = storage_table_create(stmt->table_name);
+    SqlTable* table = storage_table_create(stmt->table_name);
     if (!table) {
         return RISTRETTO_NOMEM;
     }
@@ -2692,6 +3411,14 @@ static RistrettoResult execute_create_table(QueryContext* ctx) {
     // Add columns
     for (uint32_t i = 0; i < stmt->column_count; i++) {
         storage_table_add_column(table, stmt->columns[i].name, stmt->columns[i].type);
+    }
+    
+    // Create primary index on first INTEGER column (if exists)
+    for (uint32_t i = 0; i < table->column_count; i++) {
+        if (table->columns[i].type == TYPE_INTEGER) {
+            table->primary_index = btree_create(ctx->pager, table);
+            break; // Only create index for first INTEGER column
+        }
     }
     
     // Register table
@@ -2704,8 +3431,8 @@ static RistrettoResult execute_create_table(QueryContext* ctx) {
 }
 
 static RistrettoResult execute_insert(QueryContext* ctx) {
-    Table* table = ctx->plan->table;
-    Value* values = ctx->plan->data.insert.values;
+    SqlTable* table = ctx->plan->table;
+    SqlValue* values = ctx->plan->data.insert.values;
     uint32_t value_count = ctx->plan->data.insert.value_count;
     
     // Check column count
@@ -2747,45 +3474,179 @@ static RistrettoResult execute_insert(QueryContext* ctx) {
     
     // Insert row into storage
     RowId row_id = table_insert_row(table, ctx->pager, row);
-    storage_row_destroy(row);
     
     if (row_id.page_id == 0) {
+        storage_row_destroy(row);
         return RISTRETTO_ERROR; // Failed to insert
     }
     
+    // Update index if it exists and there's an INTEGER column
+    if (table->primary_index && table->column_count > 0 && table->columns[0].type == TYPE_INTEGER) {
+        // Use the first INTEGER column value as the key
+        uint32_t key = (uint32_t)values[0].value.integer; // Assume first column is INTEGER if index exists
+        if (!btree_insert(table->primary_index, key, row_id)) {
+            // Index insertion failed - this is a problem but we've already inserted the row
+            // In a real system, we'd need transaction rollback here
+        }
+    }
+    
+    storage_row_destroy(row);
     return RISTRETTO_OK;
 }
 
-static char* value_to_string(Value* value) {
-    if (!value) return strdup("NULL");
+static char* value_to_string(SqlValue* value) {
+    if (!value) {
+        char* result = malloc(5);
+        if (result) strcpy(result, "NULL");
+        return result;
+    }
     
     switch (value->type) {
-        case TYPE_NULL:
-            return strdup("NULL");
+        case TYPE_NULL: {
+            char* result = malloc(5);
+            if (result) strcpy(result, "NULL");
+            return result;
+        }
         case TYPE_INTEGER: {
             char* str = malloc(32);
+            if (!str) {
+                char* result = malloc(5);
+                if (result) strcpy(result, "NULL");
+                return result;
+            }
             snprintf(str, 32, "%lld", (long long)value->value.integer);
             return str;
         }
         case TYPE_REAL: {
             char* str = malloc(32);
+            if (!str) {
+                char* result = malloc(5);
+                if (result) strcpy(result, "NULL");
+                return result;
+            }
             snprintf(str, 32, "%.6g", value->value.real);
             return str;
         }
-        case TYPE_TEXT:
-            return strdup(value->value.text.data ? value->value.text.data : "NULL");
-        default:
-            return strdup("?");
+        case TYPE_TEXT: {
+            if (!value->value.text.data) {
+                char* result = malloc(5);
+                if (result) strcpy(result, "NULL");
+                return result;
+            }
+            // Safety check for text length
+            if (value->value.text.len > 10000) { // Sanity check
+                char* result = malloc(16);
+                if (result) strcpy(result, "[TEXT_TOO_LONG]");
+                return result;
+            }
+            
+            // Defensive: validate text data length against actual string length
+            size_t actual_len = strlen(value->value.text.data);
+            size_t safe_len = (actual_len < value->value.text.len) ? actual_len : value->value.text.len;
+            if (safe_len > 10000) safe_len = 10000; // Additional safety cap
+            
+            char* result = malloc(safe_len + 1);
+            if (!result) {
+                // Fallback allocation for error case
+                char* fallback = malloc(5);
+                if (fallback) strcpy(fallback, "NULL");
+                return fallback;
+            }
+            
+            // Use strncpy for safer copying and ensure null termination
+            strncpy(result, value->value.text.data, safe_len);
+            result[safe_len] = '\0';
+            return result;
+        }
+        default: {
+            char* result = malloc(2);
+            if (result) strcpy(result, "?");
+            return result;
+        }
     }
 }
 
+// Check if filter can be optimized with SIMD
+static bool can_use_simd_filter(Expr* filter, SqlTable* table) {
+    if (!filter || !table || table->column_count == 0) {
+        return false;
+    }
+    
+    // Check for simple equality/comparison on INTEGER column
+    if (filter->type == EXPR_BINARY_OP) {
+        Expr* left = filter->data.binary.left;
+        Expr* right = filter->data.binary.right;
+        
+        // Look for column comparison with literal
+        if (left->type == EXPR_COLUMN && right->type == EXPR_LITERAL) {
+            // Find column index and check if it's INTEGER
+            for (uint32_t i = 0; i < table->column_count; i++) {
+                if (strcmp(table->columns[i].name, left->data.column.column) == 0 &&
+                    table->columns[i].type == TYPE_INTEGER &&
+                    right->data.literal.type == TYPE_INTEGER &&
+                    (filter->data.binary.op == OP_EQ || 
+                     filter->data.binary.op == OP_GT || 
+                     filter->data.binary.op == OP_LT)) {
+                    return true;
+                }
+            }
+        } else if (right->type == EXPR_COLUMN && left->type == EXPR_LITERAL) {
+            // Find column index and check if it's INTEGER
+            for (uint32_t i = 0; i < table->column_count; i++) {
+                if (strcmp(table->columns[i].name, right->data.column.column) == 0 &&
+                    table->columns[i].type == TYPE_INTEGER &&
+                    left->data.literal.type == TYPE_INTEGER &&
+                    (filter->data.binary.op == OP_EQ || 
+                     filter->data.binary.op == OP_GT || 
+                     filter->data.binary.op == OP_LT)) {
+                    return true;
+                }
+            }
+        }
+    }
+    
+    return false;
+}
+
+// True if the expression tree contains a (currently unsupported) LIKE operator.
+static bool expr_uses_like(Expr* expr) {
+    if (!expr || expr->type != EXPR_BINARY_OP) return false;
+    if (expr->data.binary.op == OP_LIKE) return true;
+    return expr_uses_like(expr->data.binary.left) ||
+           expr_uses_like(expr->data.binary.right);
+}
+
 static RistrettoResult execute_select(QueryContext* ctx) {
-    Table* table = ctx->plan->table;
+    // Add comprehensive validation
+    if (!ctx || !ctx->plan) {
+        return RISTRETTO_ERROR;
+    }
+    
+    SqlTable* table = ctx->plan->table;
+    if (!table || table->column_count == 0) {
+        return RISTRETTO_ERROR;
+    }
     
     if (!ctx->callback) {
         return RISTRETTO_OK; // No callback to send results to
     }
-    
+
+    Expr* filter = ctx->plan->data.scan.filter;
+
+    // LIKE is parsed but not yet evaluable. Surface it explicitly rather than
+    // silently returning the wrong row set (previously all rows; a bare
+    // default would now return zero). See the "Limitations" section.
+    if (expr_uses_like(filter)) {
+        fprintf(stderr, "RistrettoDB: LIKE operator is not supported yet\n");
+        return RISTRETTO_ERROR;
+    }
+
+    // Check if we can use SIMD optimization
+    bool use_simd = can_use_simd_filter(ctx->plan->data.scan.filter, table);
+    if (use_simd && table->row_count > 100) {
+        return execute_select_simd(ctx);
+    }
+
     // Prepare column names
     char** col_names = malloc(table->column_count * sizeof(char*));
     if (!col_names) return RISTRETTO_NOMEM;
@@ -2804,7 +3665,14 @@ static RistrettoResult execute_select(QueryContext* ctx) {
     while (!table_scanner_at_end(scanner)) {
         Row* row = table_scanner_next(scanner);
         if (!row) break;
-        
+
+        // Apply the WHERE filter. evaluate_expr returns true when filter is
+        // NULL, so an unfiltered SELECT is unaffected.
+        if (filter && !evaluate_expr(filter, row, table)) {
+            storage_row_destroy(row);
+            continue;
+        }
+
         // Convert row values to strings
         char** values = malloc(table->column_count * sizeof(char*));
         if (!values) {
@@ -2812,18 +3680,41 @@ static RistrettoResult execute_select(QueryContext* ctx) {
             continue;
         }
         
+        // Initialize all values to NULL for safety
         for (uint32_t i = 0; i < table->column_count; i++) {
-            Value* val = storage_row_get_value(row, table, i);
-            values[i] = value_to_string(val);
-            storage_value_destroy(val);
+            values[i] = NULL;
         }
         
-        // Call the callback
-        ctx->callback(ctx->callback_ctx, table->column_count, values, col_names);
-        
-        // Clean up
+        bool row_valid = true;
         for (uint32_t i = 0; i < table->column_count; i++) {
-            free(values[i]);
+            SqlValue* val = storage_row_get_value(row, table, i);
+            if (val) {
+                values[i] = value_to_string(val);
+                storage_value_destroy(val);
+            } else {
+                values[i] = malloc(5);
+                if (values[i]) {
+                    strcpy(values[i], "NULL");
+                }
+            }
+            
+            // Check if allocation failed
+            if (!values[i]) {
+                row_valid = false;
+                break;
+            }
+        }
+        
+        // Call the callback only if row is valid
+        if (row_valid) {
+            ctx->callback(ctx->callback_ctx, table->column_count, values, col_names);
+        }
+        
+        // Clean up - safely handle partially allocated arrays
+        for (uint32_t i = 0; i < table->column_count; i++) {
+            if (values[i]) {
+                free(values[i]);
+            }
         }
         free(values);
         storage_row_destroy(row);
@@ -2831,6 +3722,433 @@ static RistrettoResult execute_select(QueryContext* ctx) {
     
     table_scanner_destroy(scanner);
     free(col_names);
+    return RISTRETTO_OK;
+}
+
+static RistrettoResult execute_select_simd(QueryContext* ctx) {
+    SqlTable* table = ctx->plan->table;
+    Expr* filter = ctx->plan->data.scan.filter;
+    
+    if (!filter || filter->type != EXPR_BINARY_OP) {
+        return RISTRETTO_ERROR; // Should not happen given can_use_simd_filter check
+    }
+    
+    // Extract filter information
+    Expr* left = filter->data.binary.left;
+    Expr* right = filter->data.binary.right;
+    uint32_t col_index = UINT32_MAX;
+    int64_t compare_value = 0;
+    BinaryOp op = filter->data.binary.op;
+    
+    // Find the column and value
+    if (left->type == EXPR_COLUMN && right->type == EXPR_LITERAL) {
+        for (uint32_t i = 0; i < table->column_count; i++) {
+            if (strcmp(table->columns[i].name, left->data.column.column) == 0) {
+                col_index = i;
+                compare_value = right->data.literal.value.integer;
+                break;
+            }
+        }
+    } else if (right->type == EXPR_COLUMN && left->type == EXPR_LITERAL) {
+        for (uint32_t i = 0; i < table->column_count; i++) {
+            if (strcmp(table->columns[i].name, right->data.column.column) == 0) {
+                col_index = i;
+                compare_value = left->data.literal.value.integer;
+                // Flip operator for reversed operands
+                if (op == OP_GT) op = OP_LT;
+                else if (op == OP_LT) op = OP_GT;
+                break;
+            }
+        }
+    }
+    
+    if (col_index == UINT32_MAX) {
+        return RISTRETTO_ERROR; // Column not found
+    }
+    
+    // Prepare column names
+    char** col_names = malloc(table->column_count * sizeof(char*));
+    if (!col_names) return RISTRETTO_NOMEM;
+    
+    for (uint32_t i = 0; i < table->column_count; i++) {
+        col_names[i] = table->columns[i].name;
+    }
+    
+    // Create arrays to store column data and bitmap
+    uint8_t* bitmap = malloc(table->row_count);
+    if (!bitmap) {
+        free(col_names);
+        return RISTRETTO_NOMEM;
+    }
+    
+    // Extract column data into contiguous array for SIMD processing
+    int64_t* column_data = malloc(table->row_count * sizeof(int64_t));
+    if (!column_data) {
+        free(bitmap);
+        free(col_names);
+        return RISTRETTO_NOMEM;
+    }
+    
+    // Scan table and extract column values
+    TableScanner* scanner = table_scanner_create(table, ctx->pager);
+    if (!scanner) {
+        free(column_data);
+        free(bitmap);
+        free(col_names);
+        return RISTRETTO_NOMEM;
+    }
+    
+    uint32_t row_index = 0;
+    while (!table_scanner_at_end(scanner) && row_index < table->row_count) {
+        Row* row = table_scanner_next(scanner);
+        if (!row) break;
+        
+        SqlValue* val = storage_row_get_value(row, table, col_index);
+        if (val && val->type == TYPE_INTEGER) {
+            column_data[row_index] = val->value.integer;
+            storage_value_destroy(val);
+        } else {
+            column_data[row_index] = 0; // Default for NULL/invalid values
+            if (val) storage_value_destroy(val);
+        }
+        
+        storage_row_destroy(row);
+        row_index++;
+    }
+    
+    table_scanner_destroy(scanner);
+    uint32_t actual_rows = row_index;
+    
+    // Apply SIMD filtering
+    switch (op) {
+        case OP_EQ:
+            simd_filter_eq_i64(column_data, actual_rows, compare_value, bitmap);
+            break;
+        case OP_GT:
+            simd_filter_gt_i64(column_data, actual_rows, compare_value, bitmap);
+            break;
+        case OP_LT:
+            simd_filter_lt_i64(column_data, actual_rows, compare_value, bitmap);
+            break;
+        default:
+            // Fallback to regular scan
+            free(column_data);
+            free(bitmap);
+            free(col_names);
+            return execute_select(ctx);
+    }
+    
+    // Scan table again and return only matching rows
+    scanner = table_scanner_create(table, ctx->pager);
+    if (!scanner) {
+        free(column_data);
+        free(bitmap);
+        free(col_names);
+        return RISTRETTO_NOMEM;
+    }
+    
+    row_index = 0;
+    while (!table_scanner_at_end(scanner) && row_index < actual_rows) {
+        Row* row = table_scanner_next(scanner);
+        if (!row) break;
+        
+        // Check if this row matches the filter
+        if (bitmap[row_index]) {
+            // Convert row values to strings
+            char** values = malloc(table->column_count * sizeof(char*));
+            if (values) {
+                bool row_valid = true;
+                for (uint32_t i = 0; i < table->column_count; i++) {
+                    SqlValue* val = storage_row_get_value(row, table, i);
+                    if (val) {
+                        values[i] = value_to_string(val);
+                        storage_value_destroy(val);
+                    } else {
+                        values[i] = malloc(5);
+                        if (values[i]) strcpy(values[i], "NULL");
+                    }
+                    
+                    if (!values[i]) {
+                        row_valid = false;
+                        break;
+                    }
+                }
+                
+                if (row_valid) {
+                    ctx->callback(ctx->callback_ctx, table->column_count, values, col_names);
+                }
+                
+                // Clean up
+                for (uint32_t i = 0; i < table->column_count; i++) {
+                    if (values[i]) free(values[i]);
+                }
+                free(values);
+            }
+        }
+        
+        storage_row_destroy(row);
+        row_index++;
+    }
+    
+    table_scanner_destroy(scanner);
+    free(column_data);
+    free(bitmap);
+    free(col_names);
+    return RISTRETTO_OK;
+}
+
+static RistrettoResult execute_index_scan(QueryContext* ctx) {
+    // Add comprehensive validation
+    if (!ctx || !ctx->plan || !ctx->plan->table) {
+        return RISTRETTO_ERROR;
+    }
+    
+    SqlTable* table = ctx->plan->table;
+    if (!table->primary_index || table->column_count == 0) {
+        return RISTRETTO_ERROR; // No index or empty table
+    }
+    
+    if (!ctx->callback) {
+        return RISTRETTO_OK; // No callback to send results to
+    }
+    
+    // Extract the search key from the WHERE clause
+    Expr* filter = ctx->plan->data.scan.filter;
+    uint32_t search_key = 0;
+    bool key_found = false;
+    
+    if (filter && filter->type == EXPR_BINARY_OP && filter->data.binary.op == OP_EQ) {
+        Expr* left = filter->data.binary.left;
+        Expr* right = filter->data.binary.right;
+        
+        // Extract integer literal value
+        if (left->type == EXPR_COLUMN && right->type == EXPR_LITERAL && 
+            right->data.literal.type == TYPE_INTEGER) {
+            search_key = (uint32_t)right->data.literal.value.integer;
+            key_found = true;
+        } else if (right->type == EXPR_COLUMN && left->type == EXPR_LITERAL && 
+                   left->data.literal.type == TYPE_INTEGER) {
+            search_key = (uint32_t)left->data.literal.value.integer;
+            key_found = true;
+        }
+    }
+    
+    if (!key_found) {
+        return RISTRETTO_ERROR; // Invalid WHERE clause for index scan
+    }
+    
+    // Use B-tree to find the row
+    RowId* row_id_ptr = btree_find(table->primary_index, search_key);
+    if (!row_id_ptr) {
+        return RISTRETTO_OK; // No matching row found - this is not an error
+    }
+    
+    RowId row_id = *row_id_ptr;
+    
+    // Prepare column names
+    char** col_names = malloc(table->column_count * sizeof(char*));
+    if (!col_names) return RISTRETTO_NOMEM;
+    
+    for (uint32_t i = 0; i < table->column_count; i++) {
+        col_names[i] = table->columns[i].name;
+    }
+    
+    // Get the specific row
+    Row* row = table_get_row(table, ctx->pager, row_id);
+    if (row) {
+        // Convert row values to strings
+        char** values = malloc(table->column_count * sizeof(char*));
+        if (values) {
+            // Initialize all values to NULL for safety
+            for (uint32_t i = 0; i < table->column_count; i++) {
+                values[i] = NULL;
+            }
+            
+            bool row_valid = true;
+            for (uint32_t i = 0; i < table->column_count; i++) {
+                SqlValue* val = storage_row_get_value(row, table, i);
+                if (val) {
+                    values[i] = value_to_string(val);
+                    storage_value_destroy(val);
+                } else {
+                    values[i] = malloc(5);
+                    if (values[i]) {
+                        strcpy(values[i], "NULL");
+                    }
+                }
+                
+                // Check if allocation failed
+                if (!values[i]) {
+                    row_valid = false;
+                    break;
+                }
+            }
+            
+            // Call the callback only if row is valid
+            if (row_valid) {
+                ctx->callback(ctx->callback_ctx, table->column_count, values, col_names);
+            }
+            
+            // Clean up - safely handle partially allocated arrays
+            for (uint32_t i = 0; i < table->column_count; i++) {
+                if (values[i]) {
+                    free(values[i]);
+                }
+            }
+            free(values);
+        }
+        storage_row_destroy(row);
+    }
+    
+    free(col_names);
+    return RISTRETTO_OK;
+}
+
+static RistrettoResult execute_show_tables(QueryContext* ctx) {
+    TableCatalog* catalog = get_catalog(ctx->db);
+    
+    if (!ctx->callback) {
+        return RISTRETTO_OK;
+    }
+    
+    // Prepare column names for SHOW TABLES output
+    char* col_names[] = {"Tables_in_database"};
+    
+    for (uint32_t i = 0; i < catalog->count; i++) {
+        const char* table_name = catalog->entries[i].name;
+        
+        // Apply pattern filter if specified
+        if (ctx->plan->data.show_tables.pattern) {
+            // Simple pattern matching - for now just exact match or basic wildcard
+            const char* pattern = ctx->plan->data.show_tables.pattern;
+            bool matches = false;
+            
+            if (strcmp(pattern, "%") == 0) {
+                matches = true; // Match all
+            } else if (strstr(pattern, "%") != NULL) {
+                // Basic wildcard support - prefix match
+                char* percent_pos = strstr(pattern, "%");
+                size_t prefix_len = percent_pos - pattern;
+                matches = (strncmp(table_name, pattern, prefix_len) == 0);
+            } else {
+                matches = (strcmp(table_name, pattern) == 0);
+            }
+            
+            if (!matches) continue;
+        }
+        
+        // Create result row
+        char* values[] = {(char*)table_name};
+        ctx->callback(ctx->callback_ctx, 1, values, col_names);
+    }
+    
+    return RISTRETTO_OK;
+}
+
+static RistrettoResult execute_describe(QueryContext* ctx) {
+    SqlTable* table = ctx->plan->table;
+    if (!table) {
+        return RISTRETTO_ERROR;
+    }
+    
+    if (!ctx->callback) {
+        return RISTRETTO_OK;
+    }
+    
+    // Prepare column names for DESCRIBE output (MySQL/PostgreSQL style)
+    char* col_names[] = {"Field", "Type", "Null", "Key", "Default", "Extra"};
+    
+    for (uint32_t i = 0; i < table->column_count; i++) {
+        const char* field_name = table->columns[i].name;
+        const char* type_name;
+        
+        // Convert internal type to string
+        switch (table->columns[i].type) {
+            case TYPE_INTEGER:
+                type_name = "INTEGER";
+                break;
+            case TYPE_REAL:
+                type_name = "REAL";
+                break;
+            case TYPE_TEXT:
+                type_name = "TEXT";
+                break;
+            default:
+                type_name = "UNKNOWN";
+                break;
+        }
+        
+        // Create result row (simplified - no null/key/default/extra info for now)
+        char* values[] = {
+            (char*)field_name,
+            (char*)type_name,
+            (char*)"YES",  // Null
+            (char*)"",     // Key
+            (char*)"",     // Default
+            (char*)""      // Extra
+        };
+        
+        ctx->callback(ctx->callback_ctx, 6, values, col_names);
+    }
+    
+    return RISTRETTO_OK;
+}
+
+static RistrettoResult execute_show_create_table(QueryContext* ctx) {
+    SqlTable* table = ctx->plan->table;
+    if (!table) {
+        return RISTRETTO_ERROR;
+    }
+    
+    if (!ctx->callback) {
+        return RISTRETTO_OK;
+    }
+    
+    // Prepare column names for SHOW CREATE TABLE output
+    char* col_names[] = {"SqlTable", "Create SqlTable"};
+    
+    // Generate CREATE TABLE statement
+    char* create_stmt = malloc(4096); // Large buffer for CREATE TABLE statement
+    if (!create_stmt) {
+        return RISTRETTO_NOMEM;
+    }
+    
+    // Start building the CREATE TABLE statement
+    int pos = snprintf(create_stmt, 4096, "CREATE TABLE %s (\n", table->name);
+    
+    // Add columns
+    for (uint32_t i = 0; i < table->column_count; i++) {
+        const char* type_name;
+        switch (table->columns[i].type) {
+            case TYPE_INTEGER:
+                type_name = "INTEGER";
+                break;
+            case TYPE_REAL:
+                type_name = "REAL";
+                break;
+            case TYPE_TEXT:
+                type_name = "TEXT";
+                break;
+            default:
+                type_name = "UNKNOWN";
+                break;
+        }
+        
+        if (i > 0) {
+            pos += snprintf(create_stmt + pos, 4096 - pos, ",\n");
+        }
+        pos += snprintf(create_stmt + pos, 4096 - pos, "  %s %s", 
+                       table->columns[i].name, type_name);
+    }
+    
+    // Close the statement
+    snprintf(create_stmt + pos, 4096 - pos, "\n)");
+    
+    // Create result row
+    char* values[] = {table->name, create_stmt};
+    ctx->callback(ctx->callback_ctx, 2, values, col_names);
+    
+    free(create_stmt);
     return RISTRETTO_OK;
 }
 
@@ -2849,18 +4167,188 @@ RistrettoResult execute_plan(QueryContext* ctx) {
         case PLAN_TABLE_SCAN:
             return execute_select(ctx);
             
+        case PLAN_INDEX_SCAN:
+            return execute_index_scan(ctx);
+            
+        case PLAN_SHOW_TABLES:
+            return execute_show_tables(ctx);
+            
+        case PLAN_DESCRIBE:
+            return execute_describe(ctx);
+            
+        case PLAN_SHOW_CREATE_TABLE:
+            return execute_show_create_table(ctx);
+            
         default:
             return RISTRETTO_ERROR;
     }
 }
 
-bool evaluate_expr(Expr* expr, Row* row, Table* table) {
-    // TODO: Implement expression evaluation
-    // For now, return false
-    (void)expr;
-    (void)row;
-    (void)table;
-    return false;
+// Helper function for expression to value conversion
+static SqlValue* evaluate_expr_to_value(Expr* expr, Row* row, SqlTable* table);
+
+// Helper function for value comparison
+static int storage_value_compare(SqlValue* left, SqlValue* right) {
+    // Numeric coercion: compare INTEGER and REAL operands as doubles so a
+    // predicate like `realcol > 90` (integer literal) works. Without this a
+    // REAL-vs-INTEGER comparison falls into the type-mismatch path and the
+    // WHERE filter (now actually evaluated) would wrongly reject every row.
+    bool l_num = (left->type == TYPE_INTEGER || left->type == TYPE_REAL);
+    bool r_num = (right->type == TYPE_INTEGER || right->type == TYPE_REAL);
+    if (l_num && r_num && left->type != right->type) {
+        double l = (left->type == TYPE_INTEGER) ? (double)left->value.integer : left->value.real;
+        double r = (right->type == TYPE_INTEGER) ? (double)right->value.integer : right->value.real;
+        if (l < r) return -1;
+        if (l > r) return 1;
+        return 0;
+    }
+
+    if (left->type != right->type) return -1; // Type mismatch (e.g. TEXT vs number)
+
+    switch (left->type) {
+        case TYPE_INTEGER:
+            if (left->value.integer < right->value.integer) return -1;
+            if (left->value.integer > right->value.integer) return 1;
+            return 0;
+        case TYPE_REAL:
+            if (left->value.real < right->value.real) return -1;
+            if (left->value.real > right->value.real) return 1;
+            return 0;
+        case TYPE_TEXT: {
+            // Guard NULL .data (treat NULL as a defined ordering, not a crash).
+            // Now reachable: wiring the WHERE filter into the scan makes every
+            // TEXT predicate take this scalar path (SIMD handles INTEGER only).
+            const char* l = left->value.text.data;
+            const char* r = right->value.text.data;
+            if (!l && !r) return 0;
+            if (!l) return -1;
+            if (!r) return 1;
+            return strcmp(l, r);
+        }
+        case TYPE_NULL:
+            return 0;
+        default:
+            return -1;
+    }
+}
+
+static bool evaluate_comparison(Expr* expr, Row* row, SqlTable* table) {
+    SqlValue* left_val = evaluate_expr_to_value(expr->data.binary.left, row, table);
+    SqlValue* right_val = evaluate_expr_to_value(expr->data.binary.right, row, table);
+    
+    if (!left_val || !right_val) {
+        storage_value_destroy(left_val);
+        storage_value_destroy(right_val);
+        return false;
+    }
+    
+    int cmp = storage_value_compare(left_val, right_val);
+    bool result = false;
+    
+    switch (expr->data.binary.op) {
+        case OP_EQ: result = (cmp == 0); break;
+        case OP_NE: result = (cmp != 0); break;
+        case OP_LT: result = (cmp < 0); break;
+        case OP_LE: result = (cmp <= 0); break;
+        case OP_GT: result = (cmp > 0); break;
+        case OP_GE: result = (cmp >= 0); break;
+        default: result = false; break;
+    }
+    
+    storage_value_destroy(left_val);
+    storage_value_destroy(right_val);
+    return result;
+}
+
+static SqlValue* evaluate_expr_to_value(Expr* expr, Row* row, SqlTable* table) {
+    if (!expr) return NULL;
+    
+    switch (expr->type) {
+        case EXPR_LITERAL: {
+            SqlValue* val = malloc(sizeof(SqlValue));
+            if (val) {
+                *val = expr->data.literal;
+                // For text values, make a copy of the string
+                if (val->type == TYPE_TEXT && val->value.text.data) {
+                    val->value.text.data = strdup(val->value.text.data);
+                }
+            }
+            return val;
+        }
+        
+        case EXPR_COLUMN: {
+            // Find column index
+            int col_idx = -1;
+            for (uint32_t i = 0; i < table->column_count; i++) {
+                if (strcmp(table->columns[i].name, expr->data.column.column) == 0) {
+                    col_idx = i;
+                    break;
+                }
+            }
+            
+            if (col_idx == -1) return NULL; // Column not found
+            
+            return storage_row_get_value(row, table, col_idx);
+        }
+        
+        default:
+            return NULL;
+    }
+}
+
+bool evaluate_expr(Expr* expr, Row* row, SqlTable* table) {
+    if (!expr) return true; // No filter means include all rows
+    
+    switch (expr->type) {
+        case EXPR_LITERAL:
+            // Literals are always true in boolean context (SQL semantics)
+            return expr->data.literal.type != TYPE_NULL;
+            
+        case EXPR_COLUMN: {
+            // Find column index
+            int col_idx = -1;
+            for (uint32_t i = 0; i < table->column_count; i++) {
+                if (strcmp(table->columns[i].name, expr->data.column.column) == 0) {
+                    col_idx = i;
+                    break;
+                }
+            }
+            
+            if (col_idx == -1) return false; // Column not found
+            
+            SqlValue* val = storage_row_get_value(row, table, col_idx);
+            bool result = (val && val->type != TYPE_NULL);
+            storage_value_destroy(val);
+            return result;
+        }
+        
+        case EXPR_BINARY_OP: {
+            switch (expr->data.binary.op) {
+                case OP_AND: {
+                    bool left_result = evaluate_expr(expr->data.binary.left, row, table);
+                    bool right_result = evaluate_expr(expr->data.binary.right, row, table);
+                    return left_result && right_result;
+                }
+                case OP_OR: {
+                    bool left_result = evaluate_expr(expr->data.binary.left, row, table);
+                    bool right_result = evaluate_expr(expr->data.binary.right, row, table);
+                    return left_result || right_result;
+                }
+                case OP_EQ:
+                case OP_NE:
+                case OP_LT:
+                case OP_LE:
+                case OP_GT:
+                case OP_GE:
+                    return evaluate_comparison(expr, row, table);
+                default:
+                    return false;
+            }
+        }
+        
+        default:
+            return false;
+    }
 }
 
 /* END src/query.c */
@@ -2869,7 +4357,7 @@ bool evaluate_expr(Expr* expr, Row* row, Table* table) {
 
 struct RistrettoDB {
     Pager* pager;
-    Table** tables;
+    SqlTable** tables;
     uint32_t table_count;
     uint32_t table_capacity;
 };
@@ -2989,3 +4477,146 @@ const char* ristretto_error_string(RistrettoResult result) {
 }
 
 /* END src/db.c */
+
+/* BEGIN src/ristretto_api.c */
+/*
+** ristretto_api.c - Exported public Table V2 API (ristretto_* prefix).
+**
+** The library's internal Table V2 engine (src/table_v2.c) exports the
+** unprefixed table_* / value_* symbols that the Go binding and the C test
+** suites link against. The public embedding header (embed/ristretto.h)
+** presents the same engine under the ristretto_* prefix. This file provides
+** the thin exported wrappers that forward the prefixed public API to those
+** internal symbols, so an application that includes only ristretto.h and links
+** libristretto gets a real, link-able Table V2 surface.
+**
+** Ordering is load-bearing: RISTRETTO_NO_COMPATIBILITY_LAYER must be defined
+** BEFORE including ristretto.h, otherwise the header's compatibility macros
+** (#define table_create ristretto_table_create, ...) would rewrite the wrapper
+** bodies below into infinite self-recursion.
+*/
+#define RISTRETTO_NO_COMPATIBILITY_LAYER
+
+
+/*
+** The public RistrettoValue / RistrettoColumnDesc / RistrettoTableHeader types
+** are layout-identical to the internal Value / ColumnDesc / TableHeader types
+** (same field order, same MAX_COLUMN_NAME, same header size). These tripwires
+** prove that per build platform; the ColumnDesc assert in particular would
+** have caught the historical 8-vs-32 MAX_COLUMN_NAME ABI mismatch at compile
+** time.
+*/
+_Static_assert(sizeof(RistrettoValue) == sizeof(Value),
+               "RistrettoValue / Value ABI mismatch");
+_Static_assert(sizeof(RistrettoColumnDesc) == sizeof(ColumnDesc),
+               "RistrettoColumnDesc / ColumnDesc ABI mismatch");
+_Static_assert(sizeof(RistrettoTableHeader) == sizeof(TableHeader),
+               "RistrettoTableHeader / TableHeader ABI mismatch");
+
+/* C treats RistrettoValue and Value as distinct types even though they share a
+** layout, so a by-value Value cannot be returned directly as a RistrettoValue.
+** Convert explicitly through a byte copy. */
+static RistrettoValue rv_from_value(Value v) {
+    RistrettoValue r;
+    memcpy(&r, &v, sizeof r);
+    return r;
+}
+
+/* ---- Table lifecycle ----------------------------------------------------- */
+RistrettoTable* ristretto_table_create(const char *name, const char *schema_sql) {
+    return (RistrettoTable*)table_create(name, schema_sql);
+}
+
+RistrettoTable* ristretto_table_open(const char *name) {
+    return (RistrettoTable*)table_open(name);
+}
+
+RistrettoTable* ristretto_table_create_ex(const char *name, const char *schema_sql,
+                                          const char *base_dir, int open_mode) {
+    return (RistrettoTable*)table_create_ex(name, schema_sql, base_dir, open_mode);
+}
+
+RistrettoTable* ristretto_table_open_ex(const char *name, const char *base_dir) {
+    return (RistrettoTable*)table_open_ex(name, base_dir);
+}
+
+void ristretto_table_close(RistrettoTable *table) {
+    table_close((Table*)table);
+}
+
+/* ---- Core operations ----------------------------------------------------- */
+bool ristretto_table_append_row(RistrettoTable *table, const RistrettoValue *values) {
+    return table_append_row((Table*)table, (const Value*)values);
+}
+
+bool ristretto_table_append_row_n(RistrettoTable *table, const RistrettoValue *values,
+                                  uint32_t value_count) {
+    return table_append_row_n((Table*)table, (const Value*)values, value_count);
+}
+
+bool ristretto_table_select(RistrettoTable *table, const char *where_clause,
+                            void (*callback)(void *ctx, const RistrettoValue *row),
+                            void *ctx) {
+    /* RistrettoValue and Value are layout-identical, so the callback pointer
+    ** types differ only in the row parameter's (compatible) type. */
+    void (*cb)(void *, const Value *) = (void (*)(void *, const Value *))callback;
+    return table_select((Table*)table, where_clause, cb, ctx);
+}
+
+/* ---- File management ----------------------------------------------------- */
+bool ristretto_table_flush(RistrettoTable *table) {
+    return table_flush((Table*)table);
+}
+
+bool ristretto_table_flush_durable(RistrettoTable *table) {
+    return table_flush_durable((Table*)table);
+}
+
+bool ristretto_table_remap(RistrettoTable *table) {
+    return table_remap((Table*)table);
+}
+
+bool ristretto_table_ensure_space(RistrettoTable *table, size_t needed_bytes) {
+    return table_ensure_space((Table*)table, needed_bytes);
+}
+
+/* ---- Schema and metadata ------------------------------------------------- */
+bool ristretto_table_parse_schema(const char *schema_sql, RistrettoColumnDesc *columns,
+                                  uint32_t *column_count, uint32_t *row_size) {
+    return table_parse_schema(schema_sql, (ColumnDesc*)columns, column_count, row_size);
+}
+
+const RistrettoColumnDesc* ristretto_table_get_column(RistrettoTable *table, const char *name) {
+    return (const RistrettoColumnDesc*)table_get_column((Table*)table, name);
+}
+
+size_t ristretto_table_get_row_count(RistrettoTable *table) {
+    return table_get_row_count((Table*)table);
+}
+
+/* ---- Row packing/unpacking ----------------------------------------------- */
+bool ristretto_table_pack_row(RistrettoTable *table, const RistrettoValue *values,
+                              uint8_t *row_buffer) {
+    return table_pack_row((Table*)table, (const Value*)values, row_buffer);
+}
+
+bool ristretto_table_unpack_row(RistrettoTable *table, const uint8_t *row_buffer,
+                                RistrettoValue *values) {
+    return table_unpack_row((Table*)table, row_buffer, (Value*)values);
+}
+
+/* ---- Value utilities ----------------------------------------------------- */
+RistrettoValue ristretto_value_integer(int64_t val) { return rv_from_value(value_integer(val)); }
+RistrettoValue ristretto_value_real(double val)     { return rv_from_value(value_real(val)); }
+RistrettoValue ristretto_value_text(const char *str){ return rv_from_value(value_text(str)); }
+RistrettoValue ristretto_value_null(void)           { return rv_from_value(value_null()); }
+
+void ristretto_value_destroy(RistrettoValue *value) {
+    value_destroy((Value*)value);
+}
+
+/* ---- Utility functions --------------------------------------------------- */
+uint64_t ristretto_get_time_ms(void)         { return get_time_ms(); }
+bool     ristretto_create_data_directory(void) { return create_data_directory(); }
+
+/* END src/ristretto_api.c */
