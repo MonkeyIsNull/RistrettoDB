@@ -53,31 +53,31 @@ function originalSqlApiExample() {
     console.log(`[SUCCESS] Inserted ${products.length} products`);
 
     // Query all products
-    console.log('\\n[PRODUCTS] All products:');
+    console.log('\n[PRODUCTS] All products:');
     const allProducts = db.query('SELECT * FROM products');
     allProducts.forEach(row => {
       console.log(`   ID: ${row.id}, Name: ${row.name}, Price: $${row.price}, Category: ${row.category}`);
     });
 
     // Query electronics products
-    console.log('\\n[ELECTRONICS] Electronics products:');
+    console.log('\n[ELECTRONICS] Electronics products:');
     const electronics = db.query("SELECT name, price FROM products WHERE category = 'Electronics'");
     electronics.forEach(row => {
       console.log(`   ${row.name}: $${row.price}`);
     });
 
     // Query expensive products
-    console.log('\\n[EXPENSIVE] Expensive products (price > $100):');
+    console.log('\n[EXPENSIVE] Expensive products (price > $100):');
     const expensiveProducts = db.query('SELECT name, price FROM products WHERE price > 100');
     expensiveProducts.forEach(row => {
       console.log(`   ${row.name}: $${row.price}`);
     });
 
-    console.log(`\\n[SUCCESS] Found ${expensiveProducts.length} expensive products`);
+    console.log(`\n[SUCCESS] Found ${expensiveProducts.length} expensive products`);
 
     // Clean up
     db.close();
-    console.log('[SUCCESS] Original SQL API example completed successfully!\\n');
+    console.log('[SUCCESS] Original SQL API example completed successfully!\n');
     return true;
 
   } catch (error) {
@@ -111,7 +111,7 @@ function tableV2ApiExample() {
     console.log('   Optimized for 4.6M+ rows/second throughput');
 
     // Simulate real-time web analytics data ingestion
-    console.log('\\n[ANALYTICS] Simulating real-time analytics ingestion...');
+    console.log('\n[ANALYTICS] Simulating real-time analytics ingestion...');
 
     const eventTypes = ['page_view', 'click', 'scroll', 'form_submit', 'download'];
     const pages = ['/home', '/products', '/about', '/contact', '/checkout'];
@@ -146,14 +146,14 @@ function tableV2ApiExample() {
     console.log(`   Total rows in table: ${table.getRowCount()}`);
 
     // Performance summary
-    console.log('\\n[PERFORMANCE] Performance Summary:');
+    console.log('\n[PERFORMANCE] Performance Summary:');
     console.log(`   - Event processing rate: ~${totalInserts} events simulated`);
     console.log('   - Memory efficient: Fixed-width row format');
     console.log('   - Zero-copy I/O: Memory-mapped file access');
     console.log('   - Append-only: Optimized for write-heavy analytics workloads');
 
     // Real-world analytics insights
-    console.log('\\n[USE CASES] Real-World Analytics Use Cases:');
+    console.log('\n[USE CASES] Real-World Analytics Use Cases:');
     console.log('   - User behavior tracking');
     console.log('   - Performance monitoring');
     console.log('   - A/B testing data collection');
@@ -163,6 +163,24 @@ function tableV2ApiExample() {
     if (table.getRowCount() !== successfulInserts) {
       throw new Error('row count does not match inserts');
     }
+
+    // Read the rows back out to confirm the V2 scan decodes real values.
+    console.log('\n[READBACK] First 3 rows read back from the table:');
+    const scanned = table.select(null);
+    scanned.slice(0, 3).forEach((cols, i) => {
+      const [timestamp, userId, eventType, pageUrl, durationMs] = cols;
+      console.log(
+        `   Row ${i + 1}: timestamp=${timestamp}, user_id=${userId}, ` +
+        `event_type=${eventType}, page_url=${pageUrl}, duration_ms=${durationMs}`
+      );
+    });
+    if (scanned.length !== successfulInserts) {
+      throw new Error(`scan returned ${scanned.length} rows, expected ${successfulInserts}`);
+    }
+    if (scanned.some(cols => cols.some(v => v === undefined))) {
+      throw new Error('scan returned undefined field values');
+    }
+    console.log(`[SUCCESS] Scanned ${scanned.length} rows, all fields decoded`);
 
     // Clean up
     table.close();
@@ -176,7 +194,7 @@ function tableV2ApiExample() {
     console.log(`[SUCCESS] Reopened table, ${reopened.getRowCount()} rows persisted`);
     reopened.close();
 
-    console.log('[SUCCESS] Table V2 ultra-fast API example completed successfully!\\n');
+    console.log('[SUCCESS] Table V2 ultra-fast API example completed successfully!\n');
     return true;
 
   } catch (error) {
@@ -193,7 +211,7 @@ function integrationExamples() {
   console.log('[INTEGRATION] Integration Examples');
   console.log('=' .repeat(30));
 
-  console.log('Perfect use cases for RistrettoDB Node.js bindings:\\n');
+  console.log('Perfect use cases for RistrettoDB Node.js bindings:\n');
 
   const examples = [
     ['Web Applications', 'Express.js APIs, session storage, user analytics'],
@@ -211,13 +229,13 @@ function integrationExamples() {
     console.log(`     -> ${description}`);
   });
 
-  console.log('\\n[INSTALLATION] Installation:');
+  console.log('\n[INSTALLATION] Installation:');
   console.log('   1. Build RistrettoDB: cd ../../ && make libraries');
   console.log('   2. Install dependencies: npm install');
   console.log('   3. Copy bindings to your project');
   console.log("   4. const { RistrettoDB } = require('./ristretto');");
 
-  console.log('\\n[PERFORMANCE] Performance Benefits:');
+  console.log('\n[PERFORMANCE] Performance Benefits:');
   console.log('   - 2.8x faster than SQLite (Original API)');
   console.log('   - 4.57x faster than SQLite (Table V2 API)');
   console.log('   - Async/await compatible');
@@ -225,7 +243,7 @@ function integrationExamples() {
   console.log('   - Memory-efficient design');
   console.log('   - Perfect for microservices');
 
-  console.log('\\n[NODE.JS] Node.js Specific Advantages:');
+  console.log('\n[NODE.JS] Node.js Specific Advantages:');
   console.log('   - Non-blocking I/O friendly');
   console.log('   - Easy JSON data handling');
   console.log('   - Perfect for REST APIs');
@@ -247,9 +265,9 @@ async function main() {
     console.log();
   } catch (error) {
     console.error(`[ERROR] Failed to load RistrettoDB library: ${error.message}`);
-    console.log('\\n[INFO] Make sure to build the library first:');
+    console.log('\n[INFO] Make sure to build the library first:');
     console.log('   cd ../../ && make libraries');
-    console.log('\\n[INFO] Install Node.js dependencies:');
+    console.log('\n[INFO] Install Node.js dependencies:');
     console.log('   npm install');
     return 1;
   }
@@ -262,7 +280,7 @@ async function main() {
 
   integrationExamples();
 
-  console.log('\\n' + '=' .repeat(50));
+  console.log('\n' + '=' .repeat(50));
   if (success) {
     console.log('[SUCCESS] All examples completed successfully!');
     console.log('   Ready to integrate RistrettoDB into your Node.js applications!');
