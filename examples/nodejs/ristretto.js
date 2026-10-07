@@ -49,7 +49,7 @@ const lib = koffi.load(libPath);
 
 // ---- Types -----------------------------------------------------------------
 // RistrettoValue: { int type; union { int64 | double | {void* data; size_t len} }; bool is_null; }
-const RText = koffi.struct('RText', { data: 'void *', length: 'size_t' });
+const RText = koffi.struct('RText', { data: 'char *', length: 'size_t' });
 const RValueUnion = koffi.union('RValueUnion', {
   integer: 'int64_t',
   real: 'double',
@@ -68,6 +68,11 @@ if (koffi.sizeof(CValue) !== 32) {
 const QueryCallback = koffi.proto(
   'void RistrettoQueryCallback(void *ctx, int nCols, char **values, char **colNames)');
 
+// Table V2 scan callback: fired once per row with a pointer to an array of
+// column_count RistrettoValue structs (valid only for the duration of the call).
+const SelectCallback = koffi.proto(
+  'void RistrettoSelectCallback(void *ctx, RistrettoValueC *row)');
+
 // ---- Function bindings -----------------------------------------------------
 const c = {
   version: lib.func('const char *ristretto_version(void)'),
@@ -84,6 +89,7 @@ const c = {
   tableClose: lib.func('void ristretto_table_close(void *table)'),
   tableRowCount: lib.func('size_t ristretto_table_get_row_count(void *table)'),
   tableAppendRowN: lib.func('bool ristretto_table_append_row_n(void *table, RistrettoValueC *values, uint32_t n)'),
+  tableSelect: lib.func('bool ristretto_table_select(void *table, const char *whereClause, RistrettoSelectCallback *cb, void *ctx)'),
 };
 
 // ---- Enums / errors --------------------------------------------------------
@@ -164,8 +170,12 @@ class RistrettoDB {
     if (!this._handle) throw new RistrettoError(RistrettoResult.ERROR, 'Database is closed');
     const results = [];
     const cb = koffi.register((ctx, nCols, valuesPtr, colNamesPtr) => {
-      const values = nCols > 0 ? koffi.decode(valuesPtr, 'char *', nCols) : [];
-      const colNames = nCols > 0 ? koffi.decode(colNamesPtr, 'char *', nCols) : [];
+      // valuesPtr / colNamesPtr are char** (arrays of nCols C-string pointers).
+      // Decode them as arrays of 'char *'; passing a plain length to
+      // koffi.decode(ptr, 'char *', len) would instead read a single len-byte
+      // string, which is what previously made every field come back undefined.
+      const values = nCols > 0 ? koffi.decode(valuesPtr, koffi.array('char *', nCols)) : [];
+      const colNames = nCols > 0 ? koffi.decode(colNamesPtr, koffi.array('char *', nCols)) : [];
       const row = {};
       for (let i = 0; i < nCols; i++) row[colNames[i] ?? `col_${i}`] = values[i];
       if (callback) callback(row); else results.push(row);
@@ -183,13 +193,34 @@ class RistrettoDB {
 }
 
 // ---- Table V2 API ----------------------------------------------------------
+// Count the columns declared in a `CREATE TABLE name (...)` schema by counting
+// the top-level commas between the outermost parentheses. Used so select() can
+// decode the right number of RistrettoValue structs per row (the C scan
+// callback hands back a bare pointer with no count).
+function countSchemaColumns(schemaSql) {
+  const open = schemaSql.indexOf('(');
+  if (open < 0) return 0;
+  let depth = 0, cols = 1;
+  for (let i = open; i < schemaSql.length; i++) {
+    const ch = schemaSql[i];
+    if (ch === '(') depth++;
+    else if (ch === ')') { depth--; if (depth === 0) break; }
+    else if (ch === ',' && depth === 1) cols++;
+  }
+  return cols;
+}
+
 class RistrettoTable {
-  constructor(handle, name) { this._handle = handle; this.name = name; }
+  constructor(handle, name, columnCount = 0) {
+    this._handle = handle;
+    this.name = name;
+    this.columnCount = columnCount; // 0 when unknown (e.g. opened without schema)
+  }
 
   static create(name, schemaSql) {
     const h = c.tableCreate(name, schemaSql);
     if (!h) throw new RistrettoError(RistrettoResult.ERROR, `Failed to create table: ${name}`);
-    return new RistrettoTable(h, name);
+    return new RistrettoTable(h, name, countSchemaColumns(schemaSql));
   }
   static open(name) {
     const h = c.tableOpen(name);
@@ -211,6 +242,48 @@ class RistrettoTable {
     // keepAlive buffers stay referenced through this synchronous call.
     if (!ok) throw new RistrettoError(RistrettoResult.ERROR, `append_row failed for table '${this.name}'`);
     return true;
+  }
+
+  // Scan rows, invoking callback(valuesArray) once per row. valuesArray holds
+  // one decoded JS value per column (number / string / null). The C V2 scan
+  // currently ignores the WHERE clause and returns every row. columnCount
+  // defaults to the count learned at create(); pass it explicitly for a table
+  // opened without a schema. Returns an array of the per-row value arrays.
+  select(whereClause, callback, columnCount = this.columnCount) {
+    if (!this._handle) throw new RistrettoError(RistrettoResult.ERROR, 'Table is closed');
+    if (!columnCount || columnCount < 1) {
+      throw new RistrettoError(RistrettoResult.ERROR,
+        `columnCount for table '${this.name}' is unknown; pass it to select()`);
+    }
+    const stride = koffi.sizeof(CValue);
+    const rows = [];
+    const cb = koffi.register((ctx, rowPtr) => {
+      const values = [];
+      for (let i = 0; i < columnCount; i++) {
+        const cv = koffi.decode(rowPtr, i * stride, CValue);
+        let v;
+        if (cv.is_null || cv.type === RistrettoColumnType.NULLABLE) {
+          v = null;
+        } else if (cv.type === RistrettoColumnType.INTEGER) {
+          v = Number(cv.value.integer);
+        } else if (cv.type === RistrettoColumnType.REAL) {
+          v = cv.value.real;
+        } else if (cv.type === RistrettoColumnType.TEXT) {
+          v = cv.value.text.data; // char*, decoded to a JS string
+        } else {
+          v = null;
+        }
+        values.push(v);
+      }
+      if (callback) callback(values); else rows.push(values);
+    }, koffi.pointer(SelectCallback));
+    try {
+      const ok = c.tableSelect(this._handle, whereClause ?? null, cb, null);
+      if (!ok) throw new RistrettoError(RistrettoResult.ERROR, `select failed for table '${this.name}'`);
+    } finally {
+      koffi.unregister(cb);
+    }
+    return rows;
   }
 }
 
