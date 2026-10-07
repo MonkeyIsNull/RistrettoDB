@@ -97,6 +97,32 @@ make embedded && ls -la embed/
 # ristretto.h        # Single header (15KB)
 ```
 
+### Compiling the Single-File Amalgamation
+
+The amalgamation `embed/ristretto.c` must be compiled with the
+`RISTRETTO_EMBEDDED` define (and C11). Without `-DRISTRETTO_EMBEDDED` the
+compile fails with typedef-redefinition and incomplete-type errors.
+
+```bash
+# Compile the amalgamation into an object file
+cc -std=c11 -DRISTRETTO_EMBEDDED -c embed/ristretto.c -o ristretto.o
+
+# Compile your program and link it against the object file
+cc -std=c11 -I embed myapp.c ristretto.o -o myapp
+```
+
+Your program includes the public header and uses the API as usual:
+
+```c
+#include "ristretto.h"
+#include <stdio.h>
+
+int main(void) {
+    printf("RistrettoDB %s embedded successfully!\n", ristretto_version());
+    return 0;
+}
+```
+
 ### Language Bindings
 
 **Python Integration:**
