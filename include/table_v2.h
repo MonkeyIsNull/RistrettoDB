@@ -9,6 +9,11 @@
 
 #define MAX_COLUMNS 14
 #define MAX_COLUMN_NAME 32
+// Every row begins with a fixed-width NULL bitmap: bit i is set when column i
+// is NULL. Derive every row offset/region from this macro (never a hardcoded
+// width) so a future MAX_COLUMNS bump stays correct.
+#define NULL_BITMAP_BYTES ((MAX_COLUMNS + 7) / 8)
+_Static_assert(MAX_COLUMNS <= NULL_BITMAP_BYTES * 8, "null bitmap too small");
 // Header region reserved at the start of every .rdb file. Must be >= the
 // actual sizeof(TableHeader) (checked by the _Static_assert below) so that
 // row data written at TABLE_HEADER_SIZE never overlaps the column-descriptor
@@ -21,9 +26,10 @@
 
 // Magic bytes for file format identification
 #define TABLE_MAGIC "RSTRDB\x00\x00"
-// Format version. Bumped 1 -> 2 when TABLE_HEADER_SIZE grew from 256 to 1024:
-// the row-data offset moved, so version-1 files are cleanly rejected on open.
-#define TABLE_VERSION 2
+// Format version. Bumped 1 -> 2 when TABLE_HEADER_SIZE grew from 256 to 1024.
+// Bumped 2 -> 3 for the per-row NULL bitmap (NULLs now persist and round-trip):
+// the row layout changed, so v1/v2 files are cleanly rejected on open.
+#define TABLE_VERSION 3
 
 // Open modes for table_create_ex / table_open_ex.
 typedef enum {
@@ -110,7 +116,9 @@ Table* table_open_ex(const char *name, const char *base_dir);
 // language bindings and untrusted callers).
 bool table_append_row(Table *table, const Value *values);
 bool table_append_row_n(Table *table, const Value *values, uint32_t value_count);
-bool table_select(Table *table, const char *where_clause,
+// Scans every row and invokes callback once per row. V2 has no WHERE clause:
+// scan and filter in your application.
+bool table_select(Table *table,
                  void (*callback)(void *ctx, const Value *row), void *ctx);
 
 // File management

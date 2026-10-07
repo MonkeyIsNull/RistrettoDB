@@ -1,13 +1,14 @@
 /*
-** RistrettoDB Raw API Demo
+** RistrettoDB Raw API Demo (Table V2)
 **
-** This example demonstrates calling the exact functions exported by the library,
-** using external declarations to bypass the header confusion.
+** Demonstrates calling the exact unprefixed table_* / value_* symbols exported
+** by libristretto using local `extern` declarations, without including any
+** RistrettoDB header. This is the lowest-level way to embed the engine.
 **
 ** To compile and run:
-**   make libraries              # Build the libraries first
-**   gcc -O3 -I. -o examples/raw_api_demo examples/raw_api_demo.c -Llib -lristretto
-**   ./examples/raw_api_demo
+**   make static                 # Build lib/libristretto.a first
+**   clang -O3 -o raw_api_demo examples/raw_api_demo.c lib/libristretto.a
+**   ./raw_api_demo
 */
 
 #include <stdio.h>
@@ -15,22 +16,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// Forward declarations of structures (opaque)
-typedef struct RistrettoDB RistrettoDB;
+/* Opaque table handle. */
 typedef struct Table Table;
 
-// Result codes
-typedef enum {
-    RISTRETTO_OK = 0,
-    RISTRETTO_ERROR = -1,
-    RISTRETTO_NOMEM = -2,
-    RISTRETTO_IO_ERROR = -3,
-    RISTRETTO_PARSE_ERROR = -4,
-    RISTRETTO_NOT_FOUND = -5,
-    RISTRETTO_CONSTRAINT_ERROR = -6
-} RistrettoResult;
-
-// Value structure (from table_v2.h)
+/* Value layout mirrors include/table_v2.h. */
 typedef enum {
     COL_TYPE_INTEGER = 1,
     COL_TYPE_REAL = 2,
@@ -51,174 +40,71 @@ typedef struct {
     bool is_null;
 } Value;
 
-// External function declarations - these match what's actually exported
+/* Exported engine symbols (unprefixed). */
 extern const char* ristretto_version(void);
-extern RistrettoDB* ristretto_open(const char* filename);
-extern void ristretto_close(RistrettoDB* db);
-extern RistrettoResult ristretto_exec(RistrettoDB* db, const char* sql);
-extern const char* ristretto_error_string(RistrettoResult result);
-
-typedef void (*RistrettoCallback)(void* ctx, int n_cols, char** values, char** col_names);
-extern RistrettoResult ristretto_query(RistrettoDB* db, const char* sql, RistrettoCallback callback, void* ctx);
-
-// Table V2 functions - using actual exported names
-extern Table* table_create(const char *name, const char *schema_sql);
+extern Table* table_create_ex(const char *name, const char *schema_sql,
+                              const char *base_dir, int open_mode);
 extern void table_close(Table *table);
 extern bool table_append_row(Table *table, const Value *values);
+extern bool table_select(Table *table,
+                         void (*callback)(void *ctx, const Value *row), void *ctx);
 extern size_t table_get_row_count(Table *table);
 
 extern Value value_integer(int64_t val);
-extern Value value_real(double val);
 extern Value value_text(const char *str);
 extern void value_destroy(Value *value);
 
-void print_query_result(void* ctx, int n_cols, char** values, char** col_names) {
-    (void)ctx;
-    static int first_row = 1;
-    
-    if (first_row) {
-        printf("Query results:\n");
-        for (int i = 0; i < n_cols; i++) {
-            printf("%-15s", col_names[i]);
-        }
-        printf("\n");
-        for (int i = 0; i < n_cols; i++) {
-            printf("%-15s", "---------------");
-        }
-        printf("\n");
-        first_row = 0;
-    }
-    
-    for (int i = 0; i < n_cols; i++) {
-        printf("%-15s", values[i] ? values[i] : "NULL");
-    }
-    printf("\n");
+static void print_event(void *ctx, const Value *row) {
+    int *shown = (int *)ctx;
+    if (*shown >= 3) return;   /* only print the first few */
+    printf("  event_id=%lld severity=%lld message=\"%s\"\n",
+           (long long)row[0].value.integer,
+           (long long)row[1].value.integer,
+           row[2].is_null ? "(null)" : row[2].value.text.data);
+    (*shown)++;
 }
 
 int main(void) {
     printf("==============================================\n");
-    printf("    RistrettoDB Raw API Demo\n");
+    printf("    RistrettoDB Raw API Demo (Table V2)\n");
     printf("==============================================\n");
     printf("Library Version: %s\n\n", ristretto_version());
-    
-    // === PART 1: Original SQL API ===
-    printf("Part 1: Original SQL API Testing\n");
-    printf("================================\n");
-    
-    RistrettoDB* db = ristretto_open("raw_demo.db");
-    if (!db) {
-        fprintf(stderr, "ERROR: Failed to open database\n");
-        return 1;
-    }
-    printf("SUCCESS: Database opened successfully\n");
-    
-    // Create table
-    RistrettoResult result = ristretto_exec(db, 
-        "CREATE TABLE transactions (id INTEGER, amount REAL, description TEXT)");
-    if (result == RISTRETTO_OK) {
-        printf("SUCCESS: Table 'transactions' created\n");
-    } else {
-        fprintf(stderr, "ERROR: Table creation failed: %s\n", ristretto_error_string(result));
-    }
-    
-    // Insert test data
-    const char* transactions[] = {
-        "INSERT INTO transactions VALUES (1, 250.00, 'Grocery shopping')",
-        "INSERT INTO transactions VALUES (2, -45.00, 'Gas station')",
-        "INSERT INTO transactions VALUES (3, 1200.00, 'Salary deposit')"
-    };
-    
-    for (int i = 0; i < 3; i++) {
-        result = ristretto_exec(db, transactions[i]);
-        if (result == RISTRETTO_OK) {
-            printf("SUCCESS: Transaction %d recorded\n", i + 1);
-        } else {
-            fprintf(stderr, "ERROR: Insert failed: %s\n", ristretto_error_string(result));
-        }
-    }
-    
-    // Query the data
-    printf("\n");
-    result = ristretto_query(db, "SELECT * FROM transactions", print_query_result, NULL);
-    if (result != RISTRETTO_OK) {
-        fprintf(stderr, "ERROR: Query failed: %s\n", ristretto_error_string(result));
-    }
-    
-    ristretto_close(db);
-    printf("SUCCESS: Original SQL API test completed\n\n");
-    
-    // === PART 2: Table V2 Ultra-Fast API ===
-    printf("Part 2: Table V2 Ultra-Fast API Testing\n");
-    printf("======================================\n");
-    
-    Table* table = table_create("events", 
-        "CREATE TABLE events (event_id INTEGER, severity INTEGER, message TEXT(64))");
-    
+
+    Table *table = table_create_ex("events",
+        "CREATE TABLE events (event_id INTEGER, severity INTEGER, message TEXT(64))",
+        "data", /* RDB_CREATE_OR_TRUNCATE */ 1);
     if (!table) {
-        fprintf(stderr, "ERROR: Failed to create ultra-fast table\n");
+        fprintf(stderr, "ERROR: Failed to create table\n");
         return 1;
     }
-    printf("SUCCESS: Ultra-fast table 'events' created\n");
-    
-    // High-speed event logging
-    printf("SUCCESS: Logging 3000 events at maximum speed...\n");
-    
-    const char* event_types[] = {
+    printf("SUCCESS: table 'events' created\n");
+
+    const char *event_types[] = {
         "INFO: System startup",
-        "WARN: Memory usage high", 
+        "WARN: Memory usage high",
         "ERROR: Connection failed",
         "DEBUG: Processing request",
         "FATAL: System crash"
     };
-    
-    int successful_inserts = 0;
-    
+
+    int inserted = 0;
     for (int i = 0; i < 3000; i++) {
         Value values[3];
-        values[0] = value_integer(1000 + i);                    // event_id
-        values[1] = value_integer(i % 5);                       // severity (0-4)
-        values[2] = value_text(event_types[i % 5]);             // message
-        
-        if (table_append_row(table, values)) {
-            successful_inserts++;
-        } else {
-            fprintf(stderr, "ERROR: Failed to log event %d\n", i);
-        }
-        
-        value_destroy(&values[2]);  // Clean up text value
+        values[0] = value_integer(1000 + i);
+        values[1] = value_integer(i % 5);
+        values[2] = value_text(event_types[i % 5]);
+        if (table_append_row(table, values)) inserted++;
+        value_destroy(&values[2]);
     }
-    
-    printf("SUCCESS: Event logging completed\n");
-    printf("   Events logged: %d/3000\n", successful_inserts);
-    printf("   Total events in table: %zu\n", table_get_row_count(table));
-    
+
+    printf("SUCCESS: logged %d events\n", inserted);
+    printf("   Total events in table: %zu\n\n", table_get_row_count(table));
+
+    printf("First rows scanned back:\n");
+    int shown = 0;
+    table_select(table, print_event, &shown);
+
     table_close(table);
-    printf("SUCCESS: Table V2 test completed\n\n");
-    
-    // === Final Summary ===
-    printf("==============================================\n");
-    printf("             FINAL RESULTS\n");
-    printf("==============================================\n");
-    printf("RistrettoDB Raw API Demo Successful!\n\n");
-    
-    printf("📈 Performance Verification:\n");
-    printf("   • SQL transactions: 3 records processed\n");
-    printf("   • Ultra-fast events: %d records logged\n", successful_inserts);
-    printf("   • Both APIs functioning correctly\n\n");
-    
-    printf("🔬 Technical Validation:\n");
-    printf("   • Original SQL API: Working\n");
-    printf("   • Table V2 Ultra-Fast API: Working\n");
-    printf("   • Function exports: Verified\n");
-    printf("   • Memory management: Clean\n\n");
-    
-    printf("Production Readiness:\n");
-    printf("   • Library builds successfully\n");
-    printf("   • APIs respond correctly\n");
-    printf("   • Performance targets met\n");
-    printf("   • Ready for embedding!\n\n");
-    
-    printf("✨ RistrettoDB is ready for production use! ✨\n");
-    
+    printf("\nSUCCESS: Raw API demo completed.\n");
     return 0;
 }

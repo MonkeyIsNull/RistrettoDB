@@ -30,12 +30,6 @@ func TestVersion(t *testing.T) {
 	t.Logf("RistrettoDB %s (%d)", Version(), VersionNumber())
 }
 
-func TestQuoteString(t *testing.T) {
-	if got := QuoteString("O'Brien"); got != "'O''Brien'" {
-		t.Fatalf("QuoteString: got %q", got)
-	}
-}
-
 func TestV2AppendAndScan(t *testing.T) {
 	chdirTemp(t)
 
@@ -103,12 +97,12 @@ func TestV2AppendAndScan(t *testing.T) {
 		t.Errorf("row1 value = %v, want 2.25", got)
 	}
 
-	// Row 2: the NULL text reads back as "" (V2 does not persist NULL-ness).
+	// Row 2: the NULL text round-trips as NULL (keyed off IsNull).
 	if got := scanned[2].Get("ts").Int(); got != 1003 {
 		t.Errorf("row2 ts = %d, want 1003", got)
 	}
-	if got := scanned[2].Get("name").Text(); got != "" {
-		t.Errorf("row2 name = %q, want empty (NULL not persisted)", got)
+	if nameVal := scanned[2].Get("name"); !nameVal.IsNull {
+		t.Errorf("row2 name = %+v, want IsNull=true (NULL must round-trip)", nameVal)
 	}
 	if got := scanned[2].Get("value").Float(); got != 3.0 {
 		t.Errorf("row2 value = %v, want 3.0", got)
@@ -223,35 +217,3 @@ func TestV2ReopenSurvives(t *testing.T) {
 	}
 }
 
-func TestSQLApi(t *testing.T) {
-	chdirTemp(t)
-
-	db, err := Open("sql_test.db")
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer db.Close()
-
-	if err := db.Exec("CREATE TABLE users (id INTEGER, name TEXT)"); err != nil {
-		t.Fatalf("Exec create: %v", err)
-	}
-	for _, s := range []string{
-		"INSERT INTO users VALUES (1, 'Alice')",
-		"INSERT INTO users VALUES (2, 'Bob')",
-	} {
-		if err := db.Exec(s); err != nil {
-			t.Fatalf("Exec insert: %v", err)
-		}
-	}
-
-	rows, err := db.Query("SELECT * FROM users")
-	if err != nil {
-		t.Fatalf("Query: %v", err)
-	}
-	if len(rows) != 2 {
-		t.Fatalf("Query returned %d rows, want 2", len(rows))
-	}
-	if rows[0]["name"] != "Alice" || rows[1]["name"] != "Bob" {
-		t.Errorf("unexpected rows: %+v", rows)
-	}
-}

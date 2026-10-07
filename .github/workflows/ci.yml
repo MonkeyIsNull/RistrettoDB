@@ -29,23 +29,11 @@ jobs:
         run: clang --version
 
       # Builds with the portable baseline (no -march=native).
-      - name: Build library + CLI
+      - name: Build libraries
         run: make clean && make
 
       - name: C test suites (must pass)
-        run: make test-basic test-v2 test-comprehensive test-stress test-where
-
-      # The Original SQL API has documented in-memory/single-page limits
-      # (see README "Current Limitations"). Its suite has a known 2-pass /
-      # 6-fail baseline; assert it exactly so a NEW regression is still caught
-      # while the documented failures do not fail the job.
-      - name: Original API suite (exact known 2/6 baseline)
-        run: |
-          set +e
-          out="$(make test-original 2>&1)"
-          echo "$out"
-          echo "$out" | grep -q "Passed: 2" || { echo "::error::expected 2 passing original-API tests"; exit 1; }
-          echo "$out" | grep -q "Failed: 6" || { echo "::error::original-API failure count changed (regression?)"; exit 1; }
+        run: make test-v2 test-comprehensive test-stress test-golden
 
       - name: Amalgamation compiles standalone
         run: clang -std=c11 -DRISTRETTO_EMBEDDED -Wall -Wextra -c -o /tmp/ristretto_amalg.o embed/ristretto.c
@@ -55,7 +43,7 @@ jobs:
           make dynamic
           test -f lib/libristretto.so || { echo "::error::lib/libristretto.so not produced"; exit 1; }
 
-      - name: C examples (all 7 link + run)
+      - name: C examples (6 examples + 2 amalgamation smoke tests link + run)
         run: |
           make static
           ./scripts/build_examples.sh
@@ -87,6 +75,52 @@ jobs:
           npm install
           node example.js
 
-      # NOTE: benchmark/ is not built here (needs -lsqlite3). The
-      # benchmark/Makefile -march=native -> portable change is a portability
-      # fix only and is not exercised by this workflow.
+      # NOTE: benchmark/ is not built here. The V2 benchmark builds without
+      # sqlite3 (the SQLite contrast is opt-in via WITH_SQLITE=1), and the
+      # benchmark Makefile keeps the portable baseline (no -march=native).
+
+  # Memory-safety job. Runs on ubuntu-latest because macOS LeakSanitizer is
+  # unsupported ("detect_leaks is not supported on this platform"), so only
+  # Linux gives real leak coverage. Portable baseline flags, no -march=native.
+  asan-ubsan:
+    name: ASan + UBSan (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Build + run V2 suites under ASan/UBSan
+        run: |
+          set -e
+          SAN="-std=c11 -D_DEFAULT_SOURCE -Iinclude -Iembed -I. -fsanitize=address,undefined -fno-sanitize-recover=all -g"
+          SRC="src/table_v2.c src/ristretto_api.c src/version.c"
+          for t in table_v2 comprehensive stress golden_format; do
+            echo "=== $t ==="
+            clang $SAN -o "san_$t" $SRC "tests/test_$t.c"
+            ./"san_$t"
+          done
+      - name: Amalgamation under ASan/UBSan
+        run: |
+          set -e
+          SAN="-std=c11 -D_DEFAULT_SOURCE -Iinclude -Iembed -I. -fsanitize=address,undefined -fno-sanitize-recover=all -g"
+          clang $SAN -DRISTRETTO_EMBEDDED -c embed/ristretto.c -o ristretto_amalg_san.o
+          clang $SAN -o san_embedded embed/test_embedded.c ristretto_amalg_san.o
+          ./san_embedded
+
+  # Fuzz smoke over the schema parser. ubuntu-latest only: Apple clang ships no
+  # libFuzzer runtime, so this cannot run on the macOS runner or locally on
+  # arm64. Portable baseline, no -march=native.
+  fuzz-schema:
+    name: Fuzz schema parser (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ensure clang
+        run: sudo apt-get update && sudo apt-get install -y clang
+      - name: Build + run libFuzzer smoke
+        run: |
+          set -e
+          clang -std=c11 -D_DEFAULT_SOURCE -Iinclude \
+            -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=all -g \
+            tests/fuzz_parse_schema.c src/table_v2.c -o fuzz_parse_schema
+          ./fuzz_parse_schema -runs=100000 -max_total_time=30

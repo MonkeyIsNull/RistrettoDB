@@ -1,7 +1,7 @@
 {
   "name": "ristrettodb-nodejs-bindings",
-  "version": "2.0.0",
-  "description": "Node.js bindings for RistrettoDB - A tiny, blazingly fast, embeddable SQL engine",
+  "version": "0.3.0",
+  "description": "Node.js bindings for RistrettoDB - a fast, embeddable, append-only telemetry/analytics store",
   "main": "ristretto.js",
   "scripts": {
     "test": "node example.js",

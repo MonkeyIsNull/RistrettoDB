@@ -40,26 +40,27 @@ bool test_schema_parsing(void) {
     }
     
     if (column_count != 3) return false;
-    if (row_size != 8 + 32 + 8) return false; // INTEGER + TEXT(32) + INTEGER
-    
+    // Each row starts with the NULL bitmap, then INTEGER + TEXT(32) + INTEGER.
+    if (row_size != NULL_BITMAP_BYTES + 8 + 32 + 8) return false;
+
     // Check first column
     if (strcmp(columns[0].name, "id") != 0) return false;
     if (columns[0].type != COL_TYPE_INTEGER) return false;
     if (columns[0].length != 8) return false;
-    if (columns[0].offset != 0) return false;
-    
+    if (columns[0].offset != NULL_BITMAP_BYTES) return false;
+
     // Check second column
     if (strcmp(columns[1].name, "name") != 0) return false;
     if (columns[1].type != COL_TYPE_TEXT) return false;
     if (columns[1].length != 32) return false;
-    if (columns[1].offset != 8) return false;
-    
+    if (columns[1].offset != NULL_BITMAP_BYTES + 8) return false;
+
     // Check third column
     if (strcmp(columns[2].name, "age") != 0) return false;
     if (columns[2].type != COL_TYPE_INTEGER) return false;
     if (columns[2].length != 8) return false;
-    if (columns[2].offset != 40) return false;
-    
+    if (columns[2].offset != NULL_BITMAP_BYTES + 40) return false;
+
     return true;
 }
 
@@ -78,7 +79,7 @@ bool test_table_creation(void) {
         return false;
     }
     
-    if (table->header->row_size != 16) { // 8 + 8
+    if (table->header->row_size != NULL_BITMAP_BYTES + 16) { // bitmap + 8 + 8
         table_close(table);
         return false;
     }
@@ -170,15 +171,6 @@ static void count_callback(void *ctx, const Value *row) {
     selection_count++;
 }
 
-static void validate_callback(void *ctx, const Value *row) {
-    int *expected_id = (int *)ctx;
-    
-    // Check that we got the expected values
-    if (row[0].type == COL_TYPE_INTEGER && row[0].value.integer == *expected_id) {
-        selection_count++;
-    }
-}
-
 // Test table selection
 bool test_table_selection(void) {
     const char *schema = "CREATE TABLE select_test (id INTEGER, value REAL)";
@@ -199,7 +191,7 @@ bool test_table_selection(void) {
     
     // Test selection
     selection_count = 0;
-    if (!table_select(table, NULL, count_callback, NULL)) {
+    if (!table_select(table, count_callback, NULL)) {
         table_close(table);
         return false;
     }

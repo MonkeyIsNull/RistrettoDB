@@ -1,177 +1,169 @@
 # RistrettoDB
 
-<img src="ristretto_logo.png" alt="ttm" width="70%" />
+<img src="ristretto_logo.png" alt="RistrettoDB" width="70%" />
 
 > "Bygget på koffein og høy hastighet!"
 
-A tiny, blazingly fast, **embeddable** SQL engine in C that delivers **4.57x performance improvement** over SQLite with **4.6 million rows/second** throughput and **215ns per row** latency. Perfect for embedding in C/C++ applications, language bindings, and high-performance systems.
+**RistrettoDB is a fast, embeddable, fixed-schema, append-only, single-writer
+telemetry/analytics store written in C.** It stores fixed-width rows in an
+mmap-backed file and scans them quickly, in a tiny library you link directly
+into your application.
+
+### What it IS
+
+- A high-speed **append + scan** store for logs, telemetry, events, and
+  time-series data.
+- **Fixed-schema**: declare columns once with a `CREATE TABLE` string; rows are
+  fixed width (INTEGER/REAL = 8 bytes, TEXT(n) = n bytes).
+- **Embeddable**: one static/dynamic library, or a single-file amalgamation.
+- **Persistent**: rows are written to an `mmap`-backed `.rdb` file and survive
+  process restarts. NULLs persist and round-trip as NULL.
+- **Zero dependencies**, with Go / Python / Node bindings.
+
+### What it is NOT
+
+- **Not a general-purpose SQL database.** There is no query language at runtime:
+  no `SELECT`, no `JOIN`, no `UPDATE`/`DELETE`, no transactions, no `WHERE`
+  clause. You scan rows and filter in your own code. (The `CREATE TABLE` string
+  is only used to declare the schema.)
+- **Not multi-writer.** Exactly one writer at a time (advisory `flock`).
+- **Not crash-durable (no WAL).** Writes flush with `msync`/`fsync`; rows since
+  the last durable flush can be lost on a crash.
+
+> **Status: 0.3.0 — early but real.** The engine, format, and bindings work and
+> are tested; the API may still change before 1.0. See
+> [CHANGELOG.md](CHANGELOG.md) and [SECURITY.md](SECURITY.md).
+
+Supported platforms: POSIX, little-endian, 64-bit (macOS / Linux on arm64 /
+x86-64). Windows, big-endian, and 32-bit are not supported (the format is
+native-endian and mmap/`flock`-based).
 
 ## Quick Start (5 minutes)
 
 ```bash
 # 1. Clone and build the library
 git clone https://github.com/MonkeyIsNull/RistrettoDB && cd RistrettoDB
-make libraries
+make libraries        # produces lib/libristretto.a and lib/libristretto.so
+```
 
-# 2. Copy the header and link the library
-cp embed/ristretto.h /usr/local/include/
-cp lib/libristretto.a /usr/local/lib/
+Create your first application:
 
-# 3. Create your first application
-cat > hello_ristretto.c << 'EOF'
+```c
 #include "ristretto.h"
 #include <stdio.h>
 
-int main() {
+static void print_row(void *ctx, const RistrettoValue *row) {
+    (void)ctx;
+    printf("  id=%lld name=%s\n",
+           (long long)row[0].value.integer,
+           row[1].is_null ? "(null)" : row[1].value.text.data);
+}
+
+int main(void) {
     printf("RistrettoDB Version: %s\n", ristretto_version());
-    
-    RistrettoDB* db = ristretto_open("hello.db");
-    ristretto_exec(db, "CREATE TABLE test (id INTEGER, name TEXT)");
-    ristretto_exec(db, "INSERT INTO test VALUES (1, 'Hello World')");
-    ristretto_close(db);
-    
-    printf("Successfully embedded RistrettoDB!\n");
+
+    RistrettoTable *t = ristretto_table_create("hello",
+        "CREATE TABLE hello (id INTEGER, name TEXT(32))");
+
+    RistrettoValue row[2] = {
+        ristretto_value_integer(1),
+        ristretto_value_text("Hello World"),
+    };
+    ristretto_table_append_row(t, row);
+    ristretto_value_destroy(&row[1]);
+
+    ristretto_table_select(t, print_row, NULL);   /* scan every row */
+    ristretto_table_close(t);
     return 0;
 }
-EOF
+```
 
-# 4. Compile and run
-gcc -O3 hello_ristretto.c -lristretto -o hello_ristretto
+Compile and run:
+
+```bash
+cc -O3 -Iembed hello_ristretto.c lib/libristretto.a -o hello_ristretto
 ./hello_ristretto
 ```
 
 **Output:**
+
 ```
-RistrettoDB Version: 2.0.0
-Successfully embedded RistrettoDB!
-```
-
-## Why Choose RistrettoDB?
-
-| **Scenario** | **RistrettoDB** | **SQLite** | **Performance Gain** |
-|--------------|-----------------|------------|---------------------|
-| **High-speed logging** | 4.6M rows/sec | 1.0M rows/sec | **4.6x faster** |
-| **IoT telemetry** | 215ns/row | 984ns/row | **4.6x lower latency** |
-| **Embedded systems** | 42KB library | 1.2MB library | **29x smaller** |
-| **Language bindings** | Single header | Complex build | **Simple integration** |
-
-### Perfect For:
-- **Real-time analytics** ingestion (4.6M+ events/sec)
-- **IoT and embedded** systems (minimal footprint)
-- **Security audit** trails (tamper-evident logs)
-- **Language bindings** (Python, Node.js, Go, Rust)
-- **High-frequency trading** data capture
-- **Game telemetry** and metrics collection
-
-### Not Recommended For:
-- Applications requiring UPDATE/DELETE operations
-- Complex SQL queries (JOINs, subqueries)
-- Multi-user concurrent databases
-- General-purpose CRUD applications
-
-## SQLite-Style Embedding
-
-RistrettoDB is designed for **drop-in embedding** with zero dependencies and a single header file, just like SQLite but optimized for high-speed writes.
-
-### Single Header Integration
-
-```c
-#include "ristretto.h"  // Everything you need in one header
-
-// Choose your API based on performance needs:
-// 1. Original SQL API (2.8x faster than SQLite)
-// 2. Table V2 Ultra-Fast API (4.6x faster than SQLite)
+RistrettoDB Version: 0.3.0
+  id=1 name=Hello World
 ```
 
-### Build Targets
+## Embedding
+
+RistrettoDB is designed for drop-in embedding with zero dependencies.
+
+### Link the library
 
 ```bash
-# Static library (recommended for embedding)
-make libraries && ls -la lib/
-# libristretto.a     42KB    # Tiny static library
-# libristretto.so    56KB    # Dynamic library 
-
-# Embedded (single-file distribution)
-make embedded && ls -la embed/
-# ristretto.c        # All code in one file (embedded)
-# ristretto.h        # Single header (15KB)
+make libraries && ls lib/
+# libristretto.a     static library  — recommended for embedding
+# libristretto.so    dynamic library
 ```
 
-### Compiling the Single-File Amalgamation
+Include `embed/ristretto.h` and link `lib/libristretto.a` (or `.so`). The
+public API is the `ristretto_table_*` / `ristretto_value_*` surface.
 
-The amalgamation `embed/ristretto.c` must be compiled with the
-`RISTRETTO_EMBEDDED` define (and C11). Without `-DRISTRETTO_EMBEDDED` the
-compile fails with typedef-redefinition and incomplete-type errors.
+### Single-file amalgamation
 
-```bash
-# Compile the amalgamation into an object file
-cc -std=c11 -DRISTRETTO_EMBEDDED -c embed/ristretto.c -o ristretto.o
+`scripts/embed.py` generates `embed/ristretto.c`, a single file containing the
+whole library. There are two ways to use it:
 
-# Compile your program and link it against the object file
-cc -std=c11 -I embed myapp.c ristretto.o -o myapp
-```
-
-Your program includes the public header and uses the API as usual:
+**Option 1 — fully embedded (single translation unit):**
 
 ```c
-#include "ristretto.h"
-#include <stdio.h>
-
-int main(void) {
-    printf("RistrettoDB %s embedded successfully!\n", ristretto_version());
-    return 0;
-}
+#define RISTRETTO_EMBEDDED
+#include "ristretto.c"   /* note: .c, not .h */
+/* ... your code using ristretto_table_* ... */
 ```
 
-### Language Bindings
+**Option 2 — compile the amalgamation separately and link:**
 
-**Python Integration:**
+```bash
+# Compile the amalgamation (the RISTRETTO_EMBEDDED define supplies the
+# full implementation in one unit)
+cc -std=c11 -DRISTRETTO_EMBEDDED -Iembed -c embed/ristretto.c -o ristretto.o
+
+# Compile your program (which #includes ristretto.h) and link
+cc -std=c11 -Iembed myapp.c ristretto.o -o myapp
+```
+
+### Language bindings
+
+**Python** (ctypes — see [`examples/python/`](examples/python/)):
+
 ```python
-from ristretto import RistrettoDB, RistrettoTable, RistrettoValue
+from ristretto import RistrettoTable, RistrettoValue
 
-# Original SQL API (2.8x faster than SQLite)
-with RistrettoDB("myapp.db") as db:
-    db.exec("CREATE TABLE users (id INTEGER, name TEXT)")
-    results = db.query("SELECT * FROM users")
-    
-# Table V2 API (4.57x faster than SQLite)
-with RistrettoTable.create("events", "CREATE TABLE events (id INTEGER)") as table:
-    table.append_row([RistrettoValue.integer(1)])
-
-# See examples/python/ for complete bindings and examples
+with RistrettoTable.create("events",
+        "CREATE TABLE events (ts INTEGER, name TEXT(16))") as table:
+    table.append_row([RistrettoValue.integer(1672531200),
+                      RistrettoValue.text("login")])
+    for row in table.scan():      # [[1672531200, "login"]]
+        print(row)
 ```
 
-**Node.js Integration:**
+**Node.js** (koffi — see [`examples/nodejs/`](examples/nodejs/)):
+
 ```javascript
-const { RistrettoDB, RistrettoTable, RistrettoValue } = require('./ristretto');
+const { RistrettoTable, RistrettoValue } = require('./ristretto');
 
-// Original SQL API (2.8x faster than SQLite)
-const db = new RistrettoDB('myapp.db');
-db.exec('CREATE TABLE users (id INTEGER, name TEXT)');
-const results = db.query('SELECT * FROM users');
-db.close();
-
-// Table V2 API (4.57x faster than SQLite)
-const table = RistrettoTable.create('events', 'CREATE TABLE events (id INTEGER)');
-table.appendRow([RistrettoValue.integer(1)]);
+const table = RistrettoTable.create('events',
+    'CREATE TABLE events (ts INTEGER, name TEXT(16))');
+table.appendRow([RistrettoValue.integer(1672531200), RistrettoValue.text('login')]);
+const rows = table.select();      // [[1672531200, 'login']]
 table.close();
-
-// See examples/nodejs/ for complete bindings and examples
 ```
 
-**Go Integration:** (cgo; see [`examples/go/`](examples/go/))
+**Go** (cgo — see [`examples/go/`](examples/go/)):
+
 ```go
 import "github.com/MonkeyIsNull/RistrettoDB/examples/go/ristretto"
 
-// Original SQL API (string-built SQL, no bound parameters)
-db, err := ristretto.Open("myapp.db")
-if err != nil { log.Fatal(err) }
-defer db.Close()
-
-err = db.Exec("CREATE TABLE users (id INTEGER, name TEXT)")
-rows, err := db.Query("SELECT * FROM users")   // []map[string]string
-
-// Table V2 API (fast append-only, mmap-backed; stored at data/events.rdb)
+// Fast append-only, mmap-backed; stored at data/events.rdb
 table, err := ristretto.CreateTable("events",
     "CREATE TABLE events (ts INTEGER, name TEXT(16), value REAL)")
 defer table.Close()
@@ -182,626 +174,202 @@ err = table.AppendRow([]ristretto.Value{
     ristretto.RealValue(1.5),
 })
 
-// Read rows back (WHERE is not yet implemented in C, so Scan returns all rows)
+// V2 has no WHERE clause, so Scan returns every row; filter in Go.
 all, err := table.Scan()
 for _, r := range all {
     fmt.Println(r.Get("ts").Int(), r.Get("name").Text(), r.Get("value").Float())
 }
-
-// See examples/go/ for complete, buildable bindings, tests, and a demo.
 ```
 
-### Real-World Examples
+### Examples
 
-Our [examples/](examples/) directory contains working demonstrations:
+The [examples/](examples/) directory contains working C demos and the three
+language bindings:
 
-**C/C++ Examples:**
-- [`embedding_demo.c`](examples/embedding_demo.c) - Complete embedding guide
-- [`working_demo.c`](examples/working_demo.c) - Production-ready patterns  
-- [`raw_api_demo.c`](examples/raw_api_demo.c) - Direct API usage
-- [`direct_api_demo.c`](examples/direct_api_demo.c) - High-performance setup
+- C: [`simple_embed.c`](examples/simple_embed.c),
+  [`simple_embed_compat.c`](examples/simple_embed_compat.c),
+  [`direct_api_demo.c`](examples/direct_api_demo.c),
+  [`embedding_demo.c`](examples/embedding_demo.c) (NULL round-trip),
+  [`working_demo.c`](examples/working_demo.c),
+  [`raw_api_demo.c`](examples/raw_api_demo.c)
+- Bindings: [`python/`](examples/python/), [`nodejs/`](examples/nodejs/),
+  [`go/`](examples/go/)
 
-**Language Bindings:**
-- [`python/`](examples/python/) - Complete Python bindings (ctypes-based)
-- [`nodejs/`](examples/nodejs/) - Complete Node.js bindings (ffi-napi-based)
-- [`go/`](examples/go/) - Complete Go bindings (cgo-based)
+Run them:
 
-**Run the examples:**
 ```bash
-make static                 # Build lib/libristretto.a first (libraries: both .a and .so)
-
-# C/C++ Examples
-make examples              # Build all C examples
-./examples/embedding_demo  # See complete demonstration
-
-# Language Binding Examples
-cd examples/python && python3 example.py     # Python demo
-cd examples/nodejs && npm install && node example.js  # Node.js demo
-cd examples/go && go test ./ristretto && go run ./cmd/example   # Go tests + demo (cgo)
+make static
+./scripts/build_examples.sh                              # all C examples + amalgamation smoke tests
+cd examples/python && python3 example.py                 # Python demo
+cd examples/nodejs && npm install && node example.js     # Node demo
+cd examples/go && go test ./ristretto && go run ./cmd/example  # Go tests + demo
 ```
 
-### Production Deployment
+## How it works
 
-**Docker Integration:**
-```dockerfile
-FROM alpine:latest
-RUN apk add --no-cache gcc musl-dev
-COPY lib/libristretto.a /usr/lib/
-COPY ristretto.h /usr/include/
-```
+RistrettoDB stores each table as a single `.rdb` file: a fixed-size header
+followed by fixed-width rows, memory-mapped for zero-copy access. Appends write
+straight into the mapped region; scans walk the rows and hand each one to your
+callback.
 
-**CI/CD Integration:**
-```yaml
-# GitHub Actions example
-- name: Build with RistrettoDB
-  run: |
-    make libraries
-    gcc -O3 myapp.c -lristretto -o myapp
-    ./myapp
-```
+### Data types
 
-## What is RistrettoDB?
+- `INTEGER` — 64-bit signed integer (8 bytes)
+- `REAL` — double-precision float (8 bytes)
+- `TEXT(n)` — fixed-width string, up to 255 bytes (truncated to n-1 bytes + NUL)
+- `NULL` — any column may be NULL; NULL-ness persists via a per-row bitmap
 
-RistrettoDB is a specialized embedded database engine optimized for extreme performance in specific use cases. Named after the concentrated espresso shot, it delivers maximum performance in a minimal package by focusing on a carefully chosen subset of SQL functionality.
-
-Unlike general-purpose databases, RistrettoDB trades broad feature support for raw speed through:
-- Zero-copy memory-mapped I/O
-- Hard-coded execution pipelines (no virtual machine overhead)
-- SIMD-vectorized operations
-- Fixed-width row layouts
-- Direct memory access patterns
-
-![speed_train Logo](speed_train.png)
-
-## Features
-
-### Core SQL Support
-- **CREATE TABLE** - Define tables with typed columns
-- **INSERT** - Add data with automatic type checking and conversion
-- **SELECT** - Query data with table scanning
-
-### Supported Data Types
-- `INTEGER` - 64-bit signed integers
-- `REAL` - Double-precision floating point
-- `TEXT` - Variable-length strings (up to 255 chars)
-- `NULL` - Null values
-
-### Storage Features
-- Memory-mapped file storage for zero-copy I/O
-- Fixed-width row format for predictable performance
-- 4KB page-aligned data access
-- B+Tree indexing for efficient lookups
-- Persistent storage to disk
-
-## Performance Features
-
-RistrettoDB is engineered for maximum performance through several key optimizations:
-
-### Memory-Mapped I/O
-- Direct file access via `mmap()` eliminates buffer copying
-- Zero-copy data access reduces memory allocations
-- Page-aligned data structures for cache efficiency
-
-### SIMD Vectorization
-- Clang vector extensions for cross-platform SIMD
-- 4x faster filtering operations on integer/float columns
-- Vectorized bitmap operations for complex WHERE clauses
-- Manual prefetching for cache optimization
-
-### Hard-Coded Execution Paths
-- No bytecode interpreter or virtual machine overhead
-- Direct function calls for all operations
-- Inlined execution pipelines
-- Static query plan structures
-
-### Fixed-Width Row Format
-- Eliminates variable-length parsing overhead
-- Enables direct memory access to column data
-- Predictable cache behavior
-- 8-byte aligned column layout
-
-### Compiler Optimizations
-- Built with `-O3 -march=native` for maximum optimization
-- Platform-specific instruction generation
-- Link-time optimization ready
-
-## How It Works
-
-### Architecture Overview
+### On-disk format (v3)
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   SQL Parser    │ -> │  Query Planner   │ -> │  Execution      │
-│  (parser.c)     │    │   (query.c)      │    │  (query.c)      │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-         |                       |                       |
-         v                       v                       v
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│  Statement      │    │  QueryPlan       │    │  TableScanner   │
-│  Structures     │    │  Structures      │    │  (storage.c)    │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                                                         |
-                                                         v
-                                               ┌─────────────────┐
-                                               │  Memory-Mapped  │
-                                               │  Pager          │
-                                               │  (pager.c)      │
-                                               └─────────────────┘
+File layout (per table):
+┌───────────────────────────────────────────────────────────┐
+│                 TableHeader (1024 bytes)                    │
+│  Magic(8) | Version(4) | RowSize(4) | NumRows(8) | ...      │
+│  ColumnDescs[14] | Reserved(12)                             │
+├───────────────────────────────────────────────────────────┤
+│                        Row data                             │
+│  Row 0 (fixed width) | Row 1 | ... | Row N                  │
+└───────────────────────────────────────────────────────────┘
+
+Row layout (fixed width):
+┌──────────────┬────────────┬────────────┬────────────┐
+│ NULL bitmap  │  Column 0  │  Column 1  │    ...      │
+│ (2 bytes)    │ INTEGER(8) │ TEXT(32)   │             │
+└──────────────┴────────────┴────────────┴────────────┘
 ```
 
-### Execution Flow
-
-1. **Parse SQL** → Convert SQL text to structured statements
-2. **Plan Query** → Create direct execution plans (no optimization)
-3. **Execute** → Run hard-coded execution paths
-4. **Storage** → Direct memory-mapped file access
-
-### Data Storage Layouts
-![ristrettoDB Logo](ristretto_db.png)
-
-RistrettoDB supports two storage formats optimized for different use cases:
-
-#### Table V2 Ultra-Fast Format (table_v2.c)
-
-```
-File Layout (per table):
-┌─────────────────────────────────────────────────────────────┐
-│                    TableHeader (256 bytes)                 │
-│  Magic(8) | Version(4) | RowSize(4) | NumRows(8) | ...    │
-│  ColumnDescs[14] (16 bytes each) | Reserved(12)           │
-├─────────────────────────────────────────────────────────────┤
-│                         Row Data                            │
-│  Row 0 (fixed-width) | Row 1 | Row 2 | ... | Row N       │
-└─────────────────────────────────────────────────────────────┘
-
-Row Layout (Fixed-Width, Memory-Aligned):
-┌─────────────┬─────────────┬─────────────┬─────────────┐
-│  Column 1   │  Column 2   │  Column 3   │    ...      │
-│ INTEGER(8)  │ TEXT(32)    │ REAL(8)     │             │
-│ @ offset 0  │ @ offset 8  │ @ offset 40 │             │
-└─────────────┴─────────────┴─────────────┴─────────────┘
-
-Features:
-• Zero-copy memory-mapped access
-• Fixed-width rows for predictable performance  
-• Direct append writes (4.6M rows/sec)
-• File grows in 1MB+ blocks
-```
-
-#### Original B+Tree Format (storage.c/btree.c)
-
-```
-File Layout:
-┌─────────────┬─────────────┬─────────────┬─────────────┐
-│   Page 0    │   Page 1    │   Page 2    │    ...      │
-│ (4KB)       │ (4KB)       │ (4KB)       │             │
-└─────────────┴─────────────┴─────────────┴─────────────┘
-
-Page Layout:
-┌─────────────┬─────────────┬─────────────┬─────────────┐
-│ Page Header │    Row 1    │    Row 2    │    ...      │
-│ (8 bytes)   │ (variable)  │ (variable)  │             │
-└─────────────┴─────────────┴─────────────┴─────────────┘
-
-Features:
-• B+Tree indexed access
-• Variable-width rows
-• SQL parser integration
-• 2.8x faster than SQLite
-```
+Each row begins with a NULL bitmap (bit *i* set ⇒ column *i* is NULL), then the
+fixed-width column data. INTEGER/REAL are stored native-endian (little-endian on
+supported platforms). The format version is **3**; older v1/v2 `.rdb` files are
+rejected cleanly on open (breaking change — recreate your tables).
 
 ## Building
 
 ### Prerequisites
-- Clang compiler (recommended for SIMD support)
-- POSIX-compliant system (Linux, macOS, BSD)
 
-### Build Commands
+- Clang (the SIMD-free portable baseline builds with any C11 compiler; the
+  Makefile defaults to `clang`)
+- POSIX system (Linux, macOS, BSD), little-endian, 64-bit
 
-```bash
-# Build embeddable libraries (recommended)
-make libraries              # Static (.a) and dynamic (.so) libraries
-
-# Standard CLI build
-make                        # Build ristretto CLI tool
-
-# Debug builds
-make debug                  # CLI with debug symbols
-make debug                 # CLI and libraries with debug symbols
-
-# Distribution builds
-make embedded          # Single-file distribution in dist/
-
-# Testing
-make test                  # Basic functionality tests
-make test-comprehensive    # Validates all programming manual examples
-make test-all             # Complete test suite
-
-# Examples and benchmarks
-make examples             # Build all embedding examples
-make benchmark           # Performance benchmarks vs SQLite
-
-# Utilities
-make clean               # Clean build artifacts
-make format             # Format code
-```
-
-### Build Outputs
+### Commands
 
 ```bash
-lib/libristretto.a         # Static library (42KB) - recommended for embedding
-lib/libristretto.so        # Dynamic library (56KB)
-embed/ristretto.h          # Single public header (15KB)
-embed/ristretto.c          # Embedded (single-file distribution)
-bin/ristretto              # CLI tool
-examples/                  # Working embedding examples
+make                        # build static + dynamic libraries
+make libraries              # same as above
+make static                 # lib/libristretto.a
+make dynamic                # lib/libristretto.so
+
+make test-v2                # Table V2 tests
+make test-comprehensive     # comprehensive functionality tests
+make test-stress            # stress / performance tests
+make test-golden            # golden on-disk format round-trip (NULLs + byte-pin)
+make test-all               # all of the above
+
+make example                # build and run a tiny embedding example
+make benchmark              # build and run the V2 write-throughput benchmark
+make clean                  # remove build artifacts
 ```
 
-## Programming Manual
+The build uses a portable baseline (no `-march=native`, so binaries run across
+microarchitectures). Opt into host tuning with `make SIMD=native`.
 
-**For comprehensive examples and detailed API documentation, see the [Programming Manual](doc/PROGRAMMING_MANUAL.md)**
+## Benchmark
 
-The manual includes:
-- Complete build instructions and setup
-- Extensive examples for both Original and Table V2 APIs
-- Real-world use cases (IoT telemetry, security logging, analytics)
-- Performance optimization techniques
-- Best practices and troubleshooting
-
-> **Testing**: Run `make test-comprehensive` to validate all programming manual examples and performance claims work correctly on your system.
-
-## Usage Examples
-
-### Embedding in Your Application
-
-**Single Header Integration:**
-```c
-#include "ristretto.h"  // Everything you need
-
-int main() {
-    printf("RistrettoDB %s embedded successfully!\n", ristretto_version());
-    
-    // Original SQL API (2.8x faster than SQLite)
-    RistrettoDB* db = ristretto_open("myapp.db");
-    ristretto_exec(db, "CREATE TABLE logs (timestamp INTEGER, message TEXT)");
-    ristretto_exec(db, "INSERT INTO logs VALUES (1672531200, 'App started')");
-    ristretto_close(db);
-    
-    // Table V2 Ultra-Fast API (4.6x faster than SQLite)  
-    Table* table = table_create("metrics", 
-        "CREATE TABLE metrics (timestamp INTEGER, value REAL)");
-    
-    Value values[2];
-    values[0] = value_integer(1672531200);
-    values[1] = value_real(42.0);
-    table_append_row(table, values);
-    table_close(table);
-    
-    return 0;
-}
-```
-
-**Compile and link:**
-```bash
-gcc -O3 myapp.c -lristretto -o myapp
-```
-
-### Command Line Interface
+RistrettoDB ships one reproducible benchmark that measures Table V2 write
+throughput — `benchmark/ultra_fast_benchmark.c`:
 
 ```bash
-# Start the REPL
-bin/ristretto
-
-# Use a specific database file  
-bin/ristretto mydata.db
+make benchmark        # builds + runs with the portable baseline (-O3 -std=c11)
 ```
 
-### API Comparison
+It reports rows/sec and ns/row for appending 1,000,000 rows of
+`(id INTEGER, data TEXT(16))`, plus a `malloc` baseline for context. The exact
+number is flag- and machine-sensitive, so the benchmark header pins the config
+(compiler flags, row count, schema, machine class) — always quote that config
+alongside any number.
 
-#### Original SQL API - General Purpose (2.8x faster than SQLite)
+There is an **optional** SQLite contrast behind a compile flag
+(`make -C benchmark run-ultra-fast WITH_SQLITE=1`). It is off by default and
+CI-independent: RistrettoDB has no SQL engine, so this only contrasts the append
+path with SQLite's in-memory `INSERT`, a different workload — not an
+apples-to-apples speedup claim. See [`benchmark/README.md`](benchmark/README.md).
 
-```c
-#include "ristretto.h"
+## Ideal use cases
 
-int main() {
-    RistrettoDB* db = ristretto_open("example.db");
-    
-    // Standard SQL interface
-    ristretto_exec(db, "CREATE TABLE products (id INTEGER, name TEXT, price REAL)");
-    ristretto_exec(db, "INSERT INTO products VALUES (1, 'Laptop', 999.99)");
-    ristretto_query(db, "SELECT * FROM products", my_callback, NULL);
-    
-    ristretto_close(db);
-    return 0;
-}
-```
-
-#### Table V2 Ultra-Fast API - High Performance (4.6x faster than SQLite)
-
-```c
-#include "ristretto.h"
-
-int main() {
-    // Ultra-fast table for high-speed writes
-    Table* table = table_create("events", 
-        "CREATE TABLE events (timestamp INTEGER, user_id INTEGER, event TEXT(32))");
-    
-    // Optimized for 4.6M+ rows/second throughput
-    Value values[3];
-    values[0] = value_integer(1672531200);
-    values[1] = value_integer(12345);
-    values[2] = value_text("user_login");
-    
-    table_append_row(table, values);
-    
-    // Clean up text values (important!)
-    value_destroy(&values[2]);
-    table_close(table);
-    return 0;
-}
-```
-
-### Real-World Example: IoT Data Logger
-
-```c
-#include "ristretto.h"
-#include <time.h>
-
-int main() {
-    // Create high-speed sensor data table
-    Table* sensors = table_create("sensor_data",
-        "CREATE TABLE sensor_data ("
-        "timestamp INTEGER, device_id INTEGER, "
-        "temperature REAL, humidity REAL)");
-    
-    printf("Logging 10,000 sensor readings...\n");
-    clock_t start = clock();
-    
-    for (int i = 0; i < 10000; i++) {
-        Value values[4];
-        values[0] = value_integer(time(NULL) + i);
-        values[1] = value_integer(i % 100);  // device_id
-        values[2] = value_real(20.0 + (i % 30));  // temperature
-        values[3] = value_real(40.0 + (i % 40));  // humidity
-        
-        table_append_row(sensors, values);
-    }
-    
-    double elapsed = ((double)(clock() - start)) / CLOCKS_PER_SEC;
-    printf("Logged 10,000 readings in %.3f seconds\n", elapsed);
-    printf("Throughput: %.0f readings/second\n", 10000.0 / elapsed);
-    
-    table_close(sensors);
-    return 0;
-}
-```
-
-### Performance Testing
-
-```bash
-# Create a large dataset
-for i in {1..10000}; do
-    echo "INSERT INTO benchmark VALUES ($i, 'Item$i', $(( RANDOM % 1000 )).99);"
-done | bin/ristretto bench.db
-
-# Time SELECT operations
-time echo "SELECT * FROM benchmark;" | bin/ristretto bench.db > /dev/null
-```
-
-### Running Benchmarks
-
-RistrettoDB includes a comprehensive benchmarking suite to compare performance against SQLite:
-
-```bash
-# Build and run all benchmarks
-make benchmark
-
-# Run specific benchmark suites
-make benchmark-vs-sqlite      # Head-to-head comparison
-make benchmark-micro          # Detailed performance analysis
-make benchmark-speedtest      # SQLite speedtest1 subset
-make benchmark-ultra-fast     # Ultra-fast write performance
-
-# Build benchmark executables only
-make benchmark-build
-```
-
-The benchmark suite includes:
-- **Ultra-fast benchmark** measuring peak write performance (4.6M rows/sec)
-- **Direct comparison** with SQLite on equivalent operations
-- **Microbenchmarks** measuring CPU time, memory usage, and throughput
-- **SpeedTest1 subset** based on SQLite's official benchmark
-- **Performance analysis** tools integration (Cachegrind, Instruments)
-
-See `benchmark/README.md` for detailed benchmarking documentation.
-
-## Performance Characteristics
-
-### Benchmarks vs SQLite (Measured Results)
-
-#### Ultra-Fast Write Performance (Table V2)
-
-| Metric | RistrettoDB V2 | SQLite | Performance Gain |
-|--------|----------------|--------|------------------|
-| **Throughput** | **4.6 million rows/sec** | 1.0 million rows/sec | **4.57x faster** |
-| **Latency** | **215 ns/row** | 984 ns/row | **4.57x lower** |
-| **Test size** | 100K rows | 100K rows | Same workload |
-
-#### Original Implementation Comparison
-
-| Operation | RistrettoDB Time | SQLite Time | Speedup |
-|-----------|------------------|-------------|---------|
-| Sequential INSERT (10K rows) | 8.03 ms | 23.30 ms | **2.90x** |
-| Random INSERT (1K rows) | 0.78 ms | 1.58 ms | **2.03x** |
-| Full table scan | 0.01 ms | 0.01 ms | 0.42x |
-| SELECT with WHERE | 0.01 ms | 0.00 ms | 0.50x |
-| **Overall Performance** | **8.83 ms** | **24.89 ms** | **2.82x** |
-
-*Benchmarked on Apple Silicon with clang -O3 -march=native. SQLite configured with synchronous=OFF, journal_mode=OFF for fair comparison.*
-
-### Ideal Use Cases
-
-RistrettoDB excels in scenarios requiring **ultra-fast writes** with **simple schemas** and **append-only patterns**:
-
-| Domain              | Examples                      | Why It Works Well                |
+| Domain              | Examples                      | Why it fits                      |
 | ------------------- | ----------------------------- | -------------------------------- |
 | Network systems     | Metadata-only packet logging  | High-speed insert, small rows    |
-| Security logging    | Audit trails, sudo, auth logs | Fast + immutable                 |
+| Security logging    | Audit trails, auth logs       | Fast + append-only               |
 | Embedded systems    | Sensors, telemetry, IoT logs  | Fixed-size + zero-dependency     |
 | Analytics ingestion | Events, clickstream, traces   | Scalable insert + compact schema |
 | Edge logging        | Drones, robotics, car systems | Works offline, no heap overhead  |
-| Compliance          | Immutable records, read-only  | Append-only = tamper-evident     |
 
-### Performance Sweet Spots
+**Not a fit for:** anything needing UPDATE/DELETE, JOINs or ad-hoc queries,
+transactions, concurrent writers, or a flexible/evolving schema.
 
-**Excellent for:**
-- **Write-heavy workloads** (>100K inserts/sec)
-- **Structured logging** with fixed schemas
-- **Time-series data** collection
-- **Event sourcing** systems
-- **Embedded applications** with memory constraints
-- **Real-time analytics** ingestion
-- **Audit trails** requiring immutability
+## Limitations (by design)
 
-**Not recommended for:**
-- Applications requiring UPDATE or DELETE operations
-- Complex SQL queries (JOINs, subqueries, transactions)
-- Concurrent write-heavy workloads
-- Large-scale multi-user databases
-- Applications needing schema flexibility
-- General-purpose OLTP systems
+These are deliberate scope boundaries, documented honestly so you can plan
+around them:
 
-## Current Limitations
-
-RistrettoDB is alpha software. The limitations below are deliberate scope
-boundaries, documented honestly so callers can plan around them.
-
-### Original SQL API — in-memory, per-process, single-page
-
-The Original SQL API (`ristretto_open` / `ristretto_exec` / `ristretto_query`)
-is **not** a persistent, cross-process store today:
-
-- **Process-local catalog.** Tables and their rows live in a process-wide
-  in-memory catalog; they are **not** written back to the database file and do
-  **not** persist across `ristretto_open` calls or between processes.
-- **Single page of rows.** Row storage is capped at a single 4 KB page per
-  table, so a table holds only a few hundred rows before inserts fail with an
-  out-of-space error.
-- As a result, `make test-original` reports a known **2 pass / 6 fail**
-  baseline — the 6 failures (reopen-persistence, `COUNT(*)`, `LIKE`) are
-  manifestations of these limits, **not** regressions. Making this a durable
-  storage engine is a planned, separate effort.
-
-### SQL feature set
-
-- Supported in `WHERE`: `=`, `!=`, `<`, `<=`, `>`, `>=` and `AND` / `OR` over
-  INTEGER / REAL / TEXT (INTEGER and REAL compare numerically).
-- **`LIKE` is parsed but not evaluated**: a `WHERE ... LIKE ...` query now
-  returns an explicit "LIKE operator is not supported yet" error instead of
-  silently matching every row (its previous behavior). Real `LIKE` is future
-  work.
-- No `UPDATE` / `DELETE` / `JOIN` / `GROUP BY` / `ORDER BY` / `LIMIT`,
-  no `COUNT(*)`, no `ALTER TABLE`, no foreign keys or constraints.
-- **No bound/parameterized queries.** SQL is built from strings; callers must
-  quote and escape user input themselves (and the parser does not accept
-  escaped quotes), so the string-build path is injection-prone. Parameter
-  binding is future work.
-
-### Table V2 API — durability and concurrency
-
-The Table V2 API (fixed-width, append-only, mmap-backed) is the complete,
-persistent path, with these documented constraints:
-
-- **On-disk format is version 2.** The header region grew from 256 to 1024
-  bytes (fixing a buffer overlap for tables with 8+ columns), so **version-1
-  `.rdb` files are no longer readable** — `table_open` rejects them cleanly by
-  version check rather than corrupting data.
+- **No query language.** No `SELECT`/`WHERE`/`JOIN`/`UPDATE`/`DELETE`/`GROUP BY`/
+  `ORDER BY`, no aggregates, no transactions. You scan all rows
+  (`table_select`) and filter in your application.
 - **No WAL / crash recovery.** Writes flush asynchronously during a run;
-  `table_close` performs a synchronous `msync(MS_SYNC)` + `fsync`, and
+  `table_close` does a synchronous `msync(MS_SYNC)` + `fsync`, and
   `ristretto_table_flush_durable` forces a durable flush on demand. A crash
-  mid-run may lose rows written since the last sync. There is no write-ahead
-  log.
-- **NULL-ness is not persisted.** A value written as NULL reads back as the
-  column's zero value (`0`, `0.0`, or `""`).
-- **Destructive convenience create.** The two-argument `table_create` (and the
-  Go `CreateTable`) **truncates** any existing file. Use
+  mid-run can lose rows written since the last durable flush.
+- **Single-writer.** Table V2 takes an **advisory** `flock` so a second process
+  opening the same live table fails fast. The lock is advisory only and a
+  **no-op on some network filesystems (NFS/SMB)**, so it is not a guarantee
+  against corruption. There is no in-process locking beyond what callers add
+  (the Go binding wraps each handle in a `sync.Mutex`).
+- **Destructive convenience create.** The two-argument `table_create` (and Go
+  `CreateTable`) **truncates** any existing file. Use
   `table_create_ex(..., RDB_CREATE_NEW)` (`O_EXCL`) for non-destructive create,
   and the `base_dir` argument of `table_create_ex` / `table_open_ex` to choose
   the storage directory (default `data/`).
-- **Single-writer, single-process.** There is no in-process locking beyond what
-  callers add (the Go binding wraps each handle in a `sync.Mutex`). Table V2
-  takes an **advisory** `flock` on the file so a second process opening the same
-  live table fails fast; this lock is advisory only and is a **no-op on some
-  network filesystems (NFS/SMB)**, so it is not a guarantee against corruption.
-  The Original SQL API path takes no such lock (it is in-memory per process).
-- V2 `table_select` ignores its `where_clause` argument (it has no expression
-  parser); scan all rows and filter in the host language.
+- **Fixed schema, bounded widths.** Up to 14 columns per table; TEXT limited to
+  255 bytes; no `ALTER TABLE`.
+- **Breaking on-disk change.** Format v3 adds a per-row NULL bitmap; older
+  `.rdb` files are rejected, not migrated.
 
-### General
-
-- Text fields limited to 255 bytes; fixed schema per table (no `ALTER TABLE`).
-- Not portable-by-default-tuned beyond a safe baseline: the build drops
-  `-march=native` for portability; opt into host tuning with `make SIMD=native`.
-
-## Development
-
-### Project Structure
+## Project structure
 
 ```
 RistrettoDB/
-├── src/           # Source files
-│   ├── main.c     # CLI REPL
-│   ├── db.c       # Top-level API (original)
-│   ├── table_v2.c # Ultra-fast table engine
-│   ├── pager.c    # Memory-mapped storage
-│   ├── storage.c  # Row format and table scanning
-│   ├── btree.c    # B+Tree implementation
-│   ├── parser.c   # SQL parser
-│   ├── query.c    # Query execution
-│   ├── simd.c     # SIMD optimizations
-│   └── util.c     # Utilities
-├── include/       # Header files
-│   ├── table_v2.h # Ultra-fast table API
-│   └── ...        # Other headers
-├── embed/         # Embedding files
-│   ├── ristretto.h # Single public header (15KB)
-│   ├── ristretto.c # Embedded (single-file distribution)
-│   └── test_*.c   # Embedded test files
-├── tests/         # Test suite
-├── benchmark/     # Performance benchmarks
-├── examples/      # Working embedding examples
-├── lib/          # Built libraries
-├── bin/          # Built binaries
-└── build/        # Build artifacts
+├── src/
+│   ├── table_v2.c      # Table V2 engine
+│   ├── ristretto_api.c # Public ristretto_* wrappers
+│   └── version.c       # Version info
+├── include/
+│   └── table_v2.h      # Internal engine header
+├── embed/
+│   ├── ristretto.h     # Single public header
+│   ├── ristretto.c     # Generated single-file amalgamation
+│   └── test_embedded*.c# Amalgamation smoke tests
+├── scripts/
+│   ├── embed.py        # Amalgamation generator
+│   └── build_examples.sh
+├── tests/              # C test suites (incl. golden format + fuzz harness)
+├── benchmark/          # V2 write-throughput benchmark
+├── examples/           # C examples + Go / Python / Node bindings
+└── doc/                # Programming manual
 ```
 
-### Architecture
+## Programming manual
 
-RistrettoDB provides two complementary implementations:
-
-**Table V2 (Ultra-Fast Engine)**
-- Memory-mapped append-only files
-- Fixed-width row format  
-- 4.6M rows/sec throughput
-- 215ns per row latency
-- Schema-based tables with types
-- Best for: High-speed logging, telemetry, event streams
-
-**Original Implementation**
-- B+Tree indexed storage
-- Variable-width rows
-- 2.8x faster than SQLite overall
-- Full SQL parser integration
-- Best for: General embedded SQL needs
+For the full API reference and worked examples, see the
+[Programming Manual](doc/PROGRAMMING_MANUAL.md). Run `make test-comprehensive`
+and `make test-golden` to validate the manual's claims on your system.
 
 ## License
 
-MIT License - see LICENSE file for details.
+MIT License — see [LICENSE](LICENSE).
 
 ## Inspiration
 
-RistrettoDB is inspired by:
-- SQLite's embedded approach
-- DuckDB's vectorized execution
-- ClickHouse's columnar optimizations
-- The principle that constraints enable performance
+RistrettoDB is inspired by SQLite's embedded approach and the principle that
+constraints enable performance. Named after the concentrated espresso shot: a
+small, intense tool for one job done fast.
