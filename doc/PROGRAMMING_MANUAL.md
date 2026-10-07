@@ -24,21 +24,32 @@ A comprehensive guide to building high-performance applications with RistrettoDB
 
 RistrettoDB provides **two complementary database engines** optimized for different use cases:
 
-### **Original SQL API** - General Purpose
-- **Performance**: 2.8x faster than SQLite
-- **Interface**: Standard SQL strings (`INSERT`, `SELECT`, etc.)
-- **Use Cases**: General embedded SQL, mixed workloads
-- **File**: `#include "db.h"`
+### **Original SQL API** - Small SQL subset
+- **Performance**: 2.8x faster than SQLite (measured on a 10K-row INSERT microbenchmark)
+- **Interface**: SQL strings (`CREATE TABLE`, `INSERT`, `SELECT` with a limited `WHERE`)
+- **Use Cases**: Small, short-lived, in-process SQL
+- **Header**: `#include "ristretto.h"` (`ristretto_*` functions)
+- **Important scope**: this path is an **in-memory, per-process** catalog today. Rows
+  are **not** written back to the file and do **not** persist across processes or
+  reopen; storage is capped at a single page per table (a few hundred rows). See
+  [Original SQL API](#original-sql-api) for details.
 
 ### **Table V2 API** - Ultra-Fast Writes
 - **Performance**: 4.6 million rows/sec (4.57x faster than SQLite)
 - **Interface**: Direct C API with typed values
 - **Use Cases**: High-speed logging, telemetry, analytics ingestion
-- **File**: `#include "table_v2.h"`
+- **Header**: `#include "ristretto.h"` (`table_*` / `value_*` via the compatibility
+  layer), or the engine header `#include "table_v2.h"` when inspecting internal
+  `Table` fields (see the [Table V2 section](#table-v2-ultra-fast-api))
+- **Persistence**: fixed-width, append-only, mmap-backed files that **do** persist to
+  disk and resume across process restarts.
 
-**Key Decision**: Use Table V2 for write-heavy workloads requiring maximum speed. Use Original for general SQL compatibility.
+**Key Decision**: Use Table V2 for durable, write-heavy workloads requiring maximum
+speed. The Original SQL API is only suitable for small, transient in-process SQL.
 
-> **Validation**: All examples in this manual are validated by a comprehensive test suite. Run `make test-comprehensive` to verify everything works correctly on your system.
+> **Validation**: The Table V2 examples in this manual are validated by a
+> comprehensive test suite. Run `make test-comprehensive` to verify them on your
+> system (14/14 tests pass on a supported build).
 
 ---
 
@@ -64,41 +75,53 @@ sudo yum install sqlite-devel gcc
 
 ```bash
 # Clone and build
-git clone <repository-url>
-cd RistrettoDB
+git clone https://github.com/MonkeyIsNull/RistrettoDB && cd RistrettoDB
 
-# Standard optimized build
+# Build the CLI and both libraries
 make clean && make
+
+# Or build just the embeddable libraries
+make libraries     # static (.a) and dynamic (.so)
+make static        # static library only (lib/libristretto.a)
+make dynamic       # dynamic library only (lib/libristretto.so)
 
 # Debug build with symbols
 make debug
 
 # Run tests
-make test          # Original API tests
+make test          # Basic Table V2 functionality (alias: test-basic)
 make test-v2       # Table V2 tests
-make test-comprehensive    # Validates ALL manual examples
+make test-comprehensive    # Validates the manual's Table V2 examples
+make test-original # Original SQL API (known 2/8 baseline — see Testing section)
 make test-stress   # High-volume performance tests
 make test-all      # Run all test suites
 
-# Run benchmarks
-make benchmark-ultra-fast    # V2 performance test
+# Run benchmarks (require sqlite3 installed)
+make benchmark-ultra-fast    # V2 write performance test
 make benchmark-vs-sqlite     # Original vs SQLite
 ```
 
+> **Note**: there is no `make lib` target — use `make libraries` (or `make static` /
+> `make dynamic`).
+
 ### Version Information
 
-- **RistrettoDB Version**: 2.0
-- **Table V2 Format Version**: 1
-- **Compiler Requirements**: C11, Clang/GCC with `-march=native`
+- **RistrettoDB Version**: 2.0.0 (`ristretto_version()`)
+- **Table V2 Format Version**: 2 (`TABLE_VERSION` / `RISTRETTO_TABLE_VERSION`; the
+  1024-byte header. Version-1 `.rdb` files are rejected on open.)
+- **Compiler Requirements**: C11, Clang/GCC. The default build is a portable
+  baseline (no `-march=native`); opt into host tuning with `make SIMD=native`.
 - **Dependencies**: SQLite3 (for benchmarking only)
 - **Platforms**: Linux, macOS, BSD (POSIX-compliant)
 
 ### Build Outputs
 
 ```bash
-bin/ristretto              # Original SQL CLI
-bin/test_table_v2          # V2 API tests
-bin/ultra_fast_benchmark   # Performance benchmarks
+bin/ristretto              # SQL CLI (built by `make` / `make all`)
+bin/test_table_v2          # V2 API tests (built by `make test-v2`)
+lib/libristretto.a         # Static library (built by `make static`)
+lib/libristretto.so        # Dynamic library (built by `make dynamic`)
+# Benchmark executables are built under benchmark/ by the `make benchmark-*` targets.
 ```
 
 ---
@@ -125,12 +148,12 @@ RistrettoDB is designed for **seamless embedding** in C/C++ applications with a 
 
 ```bash
 # Build static and dynamic libraries
-make lib
+make libraries
 
 # Verify build outputs
 ls -la lib/
-# libristretto.a     42KB    # Static library (recommended)
-# libristretto.so    56KB    # Dynamic library
+# libristretto.a     # Static library (recommended)
+# libristretto.so    # Dynamic library
 ```
 
 #### Step 2: Install Headers and Libraries
@@ -159,6 +182,18 @@ LD_LIBRARY_PATH=/path/to/lib ./myapp
 
 # With custom paths
 gcc -O3 -I./deps/ristretto/ myapp.c ./deps/ristretto/libristretto.a -o myapp
+```
+
+#### Alternative: Single-File Amalgamation
+
+Instead of the library you can drop the single-file amalgamation into your build.
+`embed/ristretto.c` **must** be compiled with C11 and `-DRISTRETTO_EMBEDDED` (without
+the define the compile fails with typedef-redefinition and incomplete-type errors):
+
+```bash
+# Compile the amalgamation, then your program against it
+cc -std=c11 -DRISTRETTO_EMBEDDED -c embed/ristretto.c -o ristretto.o
+cc -std=c11 -I embed myapp.c ristretto.o -o myapp
 ```
 
 ### Complete Embedding Example
@@ -321,7 +356,7 @@ $(TARGET): $(OBJECTS)
 # Download and build RistrettoDB dependency
 $(RISTRETTO_DIR)/libristretto.a:
 	git clone https://github.com/yourorg/RistrettoDB $(RISTRETTO_DIR)
-	cd $(RISTRETTO_DIR) && make lib
+	cd $(RISTRETTO_DIR) && make libraries
 	cp $(RISTRETTO_DIR)/embed/ristretto.h $(RISTRETTO_DIR)/
 	cp $(RISTRETTO_DIR)/lib/libristretto.a $(RISTRETTO_DIR)/
 
@@ -355,7 +390,7 @@ if(NOT RISTRETTO_LIB OR NOT RISTRETTO_INCLUDE)
         GIT_REPOSITORY https://github.com/yourorg/RistrettoDB
         PREFIX ${CMAKE_BINARY_DIR}/ristretto
         CONFIGURE_COMMAND ""
-        BUILD_COMMAND make lib
+        BUILD_COMMAND make libraries
         BUILD_IN_SOURCE 1
         INSTALL_COMMAND ""
     )
@@ -440,17 +475,24 @@ RistrettoDB provides **complete, production-ready bindings** for Python, Node.js
 ### Overview
 
 **All language bindings provide**:
-- **Dual API Support**: Both Original SQL API (2.8x faster) and Table V2 Ultra-Fast API (4.57x faster)
-- **Complete Implementation**: Full working code, not prototypes
-- **Production Ready**: Error handling, resource management, thread safety
+- **Dual API Support**: Both the Original SQL API and the Table V2 Ultra-Fast API
+- **Complete Implementation**: Full working code with tests/examples, not prototypes
+- **Error handling and resource management** (the Go binding additionally guards each
+  handle with a `sync.Mutex`; the Python and Node.js bindings are not internally
+  locked — use one handle per thread)
 - **Working Examples**: Real-world use cases with complete code
 - **Easy Integration**: Simple installation and setup process
+
+The bindings inherit the engine's limitations: the Table V2 scan ignores `WHERE`
+(filter in the host language), NULL-ness is not persisted, and the Original SQL API
+is in-memory/per-process. See [Choosing the Right API](#choosing-the-right-api) and the
+main `README.md`'s "Current Limitations" section.
 
 **Location**: All bindings are in the `examples/` directory:
 ```
 examples/
 ├── python/          # Python bindings (ctypes-based)
-├── nodejs/          # Node.js bindings (ffi-napi-based)  
+├── nodejs/          # Node.js bindings (koffi-based)
 └── go/              # Go bindings (cgo-based)
 ```
 
@@ -459,7 +501,7 @@ examples/
 | Language | Implementation | Dependencies | Best For |
 |----------|---------------|--------------|----------|
 | **Python** | ctypes | Zero (standard library) | Data science, ML, analytics |
-| **Node.js** | ffi-napi | ffi-napi, ref-napi | Web APIs, microservices, real-time |
+| **Node.js** | koffi (FFI) | `koffi` (prebuilt, no native build) | Web APIs, microservices, real-time |
 | **Go** | cgo | Zero (standard library) | Cloud-native, microservices, systems |
 
 ### Python Bindings
@@ -472,7 +514,7 @@ examples/
 
 ```bash
 # 1. Build RistrettoDB library
-cd ../../ && make lib
+cd ../../ && make libraries
 
 # 2. Run Python example
 cd examples/python
@@ -573,13 +615,13 @@ except RistrettoError as e:
 
 **System Requirements**
 - Python 3.6+
-- RistrettoDB library built (`make lib`)
+- RistrettoDB library built (`make libraries`)
 - POSIX-compliant system (Linux, macOS, BSD)
 
 **Installation Steps**
 ```bash
 # 1. Build RistrettoDB
-cd /path/to/RistrettoDB && make lib
+cd /path/to/RistrettoDB && make libraries
 
 # 2. Copy Python bindings
 cp examples/python/ristretto.py your_project/
@@ -608,14 +650,14 @@ from ristretto import RistrettoDB
 ### Node.js Bindings
 
 **Location**: `examples/nodejs/`  
-**Implementation**: ffi-napi based, minimal dependencies  
+**Implementation**: koffi-based (prebuilt FFI, no native build step)  
 **Performance**: 2.8x faster (SQL) / 4.57x faster (Table V2) than SQLite
 
 #### Quick Start
 
 ```bash
 # 1. Build RistrettoDB library
-cd ../../ && make lib
+cd ../../ && make libraries
 
 # 2. Install Node.js dependencies
 cd examples/nodejs
@@ -706,17 +748,17 @@ value.isNull                        // Whether value is null
 #### Installation & Requirements
 
 **System Requirements**
-- Node.js 12.0.0+
-- Dependencies: ffi-napi, ref-napi
-- RistrettoDB library built (`make lib`)
+- Node.js 18.0.0+
+- Dependency: `koffi` (prebuilt FFI — no native build toolchain required)
+- RistrettoDB **dynamic** library built (`make dynamic`, or `make libraries`)
 - POSIX-compliant system (Linux, macOS, BSD)
 
 **Dependencies Installation**
 ```bash
-# Install required Node.js packages
-npm install ffi-napi ref-napi
+# Install the single FFI dependency
+npm install koffi
 
-# Or copy from examples
+# Or copy the example's package.json and install
 cp examples/nodejs/package.json your_project/
 npm install
 ```
@@ -737,27 +779,30 @@ npm install
 
 ### Go Bindings
 
-**Location**: `examples/go/`  
+**Location**: `examples/go/` (a self-contained Go module:
+`github.com/MonkeyIsNull/RistrettoDB/examples/go`)  
 **Implementation**: cgo-based, native Go integration  
 **Performance**: 2.8x faster (SQL) / 4.57x faster (Table V2) than SQLite
 
 #### Quick Start
 
+The cgo directives in `ristretto/ristretto.go` link `lib/libristretto.a` **by path**
+(relative to the source via `${SRCDIR}`), so no `CGO_LDFLAGS` / `LD_LIBRARY_PATH`
+environment variables are needed and the binary has no runtime dependency on the
+shared library.
+
 ```bash
-# 1. Build RistrettoDB library
-cd ../../ && make lib
+# 1. Build the static library from the repository root
+cd ../../ && make static        # produces lib/libristretto.a
 
-# 2. Set up environment for cgo
-export CGO_LDFLAGS="-L../../lib"
-export LD_LIBRARY_PATH="../../lib:$LD_LIBRARY_PATH"
-
-# 3. Run Go example
+# 2. From the Go module directory, build, test, and run the demo
 cd examples/go
-go run example.go
+go build ./...
+go test ./ristretto
+go run ./cmd/example
 
-# 4. Copy bindings to your project
-cp examples/go/ristretto.go your_project/
-cp examples/go/go.mod your_project/  # optional
+# 3. Use in your own project: import the module path
+#    github.com/MonkeyIsNull/RistrettoDB/examples/go/ristretto
 ```
 
 #### Basic Usage
@@ -768,55 +813,57 @@ package main
 import (
     "fmt"
     "log"
-    "./ristretto" // Adjust path as needed
+
+    "github.com/MonkeyIsNull/RistrettoDB/examples/go/ristretto"
 )
 
 func main() {
-    // Original SQL API - General Purpose (2.8x faster than SQLite)
+    // Original SQL API (in-memory, per-process; limited SQL subset)
     db, err := ristretto.Open("myapp.db")
     if err != nil {
         log.Fatal(err)
     }
     defer db.Close()
 
-    err = db.Exec("CREATE TABLE users (id INTEGER, name TEXT, score REAL)")
-    if err != nil {
+    if err = db.Exec("CREATE TABLE users (id INTEGER, name TEXT, score REAL)"); err != nil {
+        log.Fatal(err)
+    }
+    if err = db.Exec("INSERT INTO users VALUES (1, 'Alice', 95.5)"); err != nil {
         log.Fatal(err)
     }
 
-    err = db.Exec("INSERT INTO users VALUES (1, 'Alice', 95.5)")
-    if err != nil {
-        log.Fatal(err)
-    }
-
+    // Query returns []QueryResult, where QueryResult is map[string]string.
     results, err := db.Query("SELECT * FROM users WHERE score > 90")
     if err != nil {
         log.Fatal(err)
     }
-
     for _, row := range results {
         fmt.Printf("User: %s, Score: %s\n", row["name"], row["score"])
     }
 
-    // Table V2 API - Ultra-Fast Writes (4.57x faster than SQLite)  
-    table, err := ristretto.CreateTable("events", 
+    // Table V2 API - Ultra-Fast Writes (4.57x faster than SQLite)
+    table, err := ristretto.CreateTable("events",
         "CREATE TABLE events (timestamp INTEGER, event TEXT(32))")
     if err != nil {
         log.Fatal(err)
     }
     defer table.Close()
 
-    values := []ristretto.Value{
-        ristretto.IntegerValue(time.Now().Unix()),
+    err = table.AppendRow([]ristretto.Value{
+        ristretto.IntegerValue(1672531200),
         ristretto.TextValue("user_login"),
-    }
-
-    err = table.AppendRow(values)
+    })
     if err != nil {
         log.Fatal(err)
     }
+    fmt.Printf("Total events: %d\n", table.RowCount())
 
-    fmt.Printf("Total events: %d\n", table.GetRowCount())
+    // Read rows back. WHERE is not implemented in C, so Scan returns every row;
+    // filter in Go.
+    rows, _ := table.Scan()
+    for _, r := range rows {
+        fmt.Println(r.Get("timestamp").Int(), r.Get("event").Text())
+    }
 }
 ```
 
@@ -825,11 +872,12 @@ func main() {
 **Package Functions**
 
 ```go
-func Version() string                    // Get library version
-func VersionNumber() int                 // Get version number
-func Open(filename string) (*DB, error) // Open database
-func CreateTable(name, schema string) (*Table, error) // Create table
-func OpenTable(name string) (*Table, error)           // Open table
+func Version() string                                  // Library version ("2.0.0")
+func VersionNumber() int                               // Packed numeric version
+func Open(filename string) (*DB, error)                // Open SQL database
+func CreateTable(name, schema string) (*Table, error)  // Create (truncates) a V2 table
+func OpenTable(name string) (*Table, error)            // Open/resume a V2 table
+func QuoteString(s string) string                      // Quote a TEXT literal (no bound params)
 ```
 
 **Value Types**
@@ -838,61 +886,63 @@ func OpenTable(name string) (*Table, error)           // Open table
 func IntegerValue(val int64) Value       // Create integer value
 func RealValue(val float64) Value        // Create real value
 func TextValue(val string) Value         // Create text value
-func NullValue() Value                   // Create null value
+func NullValue() Value                   // Create null value (NULL-ness is not persisted)
+
+// Accessors on a scanned Value:
+func (v Value) Int() int64
+func (v Value) Float() float64
+func (v Value) Text() string
 ```
 
 **DB (Original SQL API)**
 
 ```go
-type DB struct { /* ... */ }
+type DB struct { /* ... */ }  // guarded by an internal sync.Mutex
 
-// Methods
 func (db *DB) Close() error
 func (db *DB) Exec(sql string) error
 func (db *DB) Query(sql string) ([]QueryResult, error)
 
-// QueryResult is map[string]string representing a row
+// QueryResult is one row keyed by column name; values are strings.
 type QueryResult map[string]string
 ```
 
 **Table (Table V2 Ultra-Fast API)**
 
 ```go
-type Table struct { /* ... */ }
+type Table struct { /* ... */ }  // guarded by an internal sync.Mutex
 
-// Methods
 func (t *Table) Close() error
 func (t *Table) AppendRow(values []Value) error
-func (t *Table) GetRowCount() int64
+func (t *Table) RowCount() int64
 func (t *Table) Name() string
+func (t *Table) Columns() []ColumnInfo
+func (t *Table) Scan() ([]Row, error)            // returns all rows (WHERE ignored)
+func (t *Table) ForEach(fn func(Row) bool) error // return false to stop early
+
+// Row is a scanned row; Get looks up a column by name.
+type Row struct { /* ... */ }
+func (r Row) Get(name string) Value
 ```
 
 #### Installation & Requirements
 
 **System Requirements**
-- Go 1.19+
+- Go 1.21+
 - CGO enabled (default)
-- RistrettoDB library built (`make lib`)
+- RistrettoDB **static** library built (`make static` → `lib/libristretto.a`)
+- A C toolchain (clang/gcc) for cgo
 - POSIX-compliant system (Linux, macOS, BSD)
-
-**Build Configuration**
-
-**Environment Variables**
-```bash
-export CGO_LDFLAGS="-L/path/to/ristrettodb/lib"
-export LD_LIBRARY_PATH="/path/to/ristrettodb/lib:$LD_LIBRARY_PATH"
-```
 
 **Build Commands**
 ```bash
-# Simple build
-go build example.go
+# From the examples/go module directory
+go build ./...
+go test ./ristretto
+go run ./cmd/example
 
-# Build with library path
-go build -ldflags "-L../../lib" example.go
-
-# Cross-compilation (ensure library is available for target)
-GOOS=linux GOARCH=amd64 go build example.go
+# Cross-compilation requires a matching C cross-toolchain, since cgo compiles the
+# bundled C glue and links the static archive for the target.
 ```
 
 #### Use Cases
@@ -926,7 +976,8 @@ Each language binding includes **complete working examples**:
 - Real-world use cases: Express.js APIs, WebSocket servers, analytics
 
 **Go Examples**:
-- `examples/go/example.go` - Complete demonstration
+- `examples/go/cmd/example/main.go` - Complete runnable demo
+- `examples/go/ristretto/ristretto_test.go` - Test suite
 - `examples/go/README.md` - Full documentation  
 - Real-world use cases: Web APIs, microservices, IoT platforms
 
@@ -934,8 +985,8 @@ Each language binding includes **complete working examples**:
 
 **Run all language binding examples**:
 ```bash
-# Build RistrettoDB first
-make lib
+# Build RistrettoDB first (dynamic for Python/Node, static for Go)
+make libraries
 
 # Test Python bindings
 cd examples/python && python3 example.py
@@ -943,8 +994,8 @@ cd examples/python && python3 example.py
 # Test Node.js bindings  
 cd examples/nodejs && npm install && node example.js
 
-# Test Go bindings
-cd examples/go && go run example.go
+# Test Go bindings (runs the test suite and the demo)
+cd examples/go && go test ./ristretto && go run ./cmd/example
 ```
 
 **Validate examples with comprehensive tests**:
@@ -962,10 +1013,12 @@ make test-comprehensive
 
 **Language Bindings** (recommended for Python/Node.js/Go):
 ```bash
-# Copy language-specific bindings
-cp examples/python/ristretto.py your_project/    # Python
-cp examples/nodejs/ristretto.js your_project/    # Node.js  
-cp examples/go/ristretto.go your_project/        # Go
+# Python / Node.js: copy the single binding file into your project
+cp examples/python/ristretto.py your_project/    # Python (needs the dynamic lib)
+cp examples/nodejs/ristretto.js your_project/    # Node.js (needs the dynamic lib + koffi)
+
+# Go: import the module (it bundles the cgo glue cbridge.c/.h and exports.go)
+#   import "github.com/MonkeyIsNull/RistrettoDB/examples/go/ristretto"
 ```
 
 **Library Linking** (for other languages):
@@ -984,38 +1037,59 @@ embed/ristretto.h      # C header for bindings
 
 | Requirement | Original API | Table V2 API |
 |-------------|--------------|--------------|
-| **SQL compatibility** | YES: Full SQL parsing | NO: Direct API only |
-| **Write performance** | ~1M rows/sec | FAST: 4.6M rows/sec |
-| **Query flexibility** | YES: SQL WHERE, etc. | FAST: Table scan only |
-| **Memory usage** | Variable | FAST: Fixed, predictable |
-| **Schema changes** | YES: Dynamic | NO: Fixed at creation |
-| **Transactions** | NO: Not supported | NO: Not supported |
-| **File format** | B+Tree pages | FAST: Append-only |
+| **SQL interface** | YES: limited subset (`CREATE`/`INSERT`/`SELECT`) | NO: direct typed C API only |
+| **Write performance** | fast on a 10K-row INSERT microbench (2.8x SQLite) | 4.6M rows/sec |
+| **Query flexibility** | `WHERE` with `=,!=,<,<=,>,>=` + `AND`/`OR` (no `LIKE`/`COUNT`/`JOIN`) | full table scan only; `WHERE` ignored |
+| **Persistence** | NO: in-memory, per-process; not written back | YES: mmap-backed, resumes across restarts |
+| **Capacity** | ~1 page (a few hundred rows) per table | grows the file as needed |
+| **Memory usage** | Variable | Fixed, predictable |
+| **Schema changes** | Fixed at `CREATE` (no `ALTER TABLE`) | Fixed at creation |
+| **Transactions** | NO: not supported | NO: not supported |
+| **File format** | in-memory catalog (single page) | append-only, fixed-width rows |
 
 ### Use Case Guidelines
 
 **Choose Table V2 API when:**
 - Writing >100K rows/second
+- You need the data to persist to disk
 - Fixed, known schema
 - Logging, telemetry, analytics
 - Memory/performance critical
 - Embedded systems
 
-**Choose Original API when:**
-- Need SQL string compatibility
-- Variable schemas
-- Mixed read/write workloads
-- Prototyping/development
-- Existing SQL knowledge
+**Choose the Original SQL API when:**
+- You need a SQL-string interface for a small, transient dataset
+- The data is short-lived and used within a single process (it is not persisted)
+- A few hundred rows per table is enough
+- Prototyping with a familiar `CREATE`/`INSERT`/`SELECT` surface
+
+> For durable storage today, use the Table V2 API. The Original SQL API's persistent,
+> cross-process storage engine is planned, separate work.
 
 ---
 
 ## Original SQL API
 
+> **Scope and limitations (read first).** The Original SQL API is an **in-memory,
+> per-process** engine today:
+> - Rows live in a process-wide catalog and are **not** written back to the file;
+>   they do **not** persist across `ristretto_open` calls or between processes.
+> - Row storage is capped at a **single page per table** (a few hundred rows) before
+>   inserts fail with an out-of-space error.
+> - Supported `WHERE`: `=`, `!=`, `<`, `<=`, `>`, `>=` and `AND`/`OR`. There is **no**
+>   `LIKE` evaluation (it returns an explicit "not supported yet" error), **no**
+>   `COUNT(*)` or other aggregates, and **no** `UPDATE`/`DELETE`/`JOIN`/`GROUP BY`/
+>   `ORDER BY`/`LIMIT`/`ALTER TABLE`.
+> - **No bound parameters.** SQL is built from strings; callers must quote/escape user
+>   input themselves, and the parser does not accept escaped single-quotes, so TEXT
+>   literals cannot contain a `'`. The string-build path is injection-prone.
+>
+> For durable, high-volume storage use the [Table V2 API](#table-v2-ultra-fast-api).
+
 ### Basic Usage
 
 ```c
-#include "db.h"
+#include "ristretto.h"
 #include <stdio.h>
 
 int main() {
@@ -1045,7 +1119,7 @@ int main() {
 ### Inserting Data
 
 ```c
-#include "db.h"
+#include "ristretto.h"
 
 // Single insert
 int insert_user(RistrettoDB* db, int id, const char* name, const char* email) {
@@ -1087,10 +1161,13 @@ int insert_test_data(RistrettoDB* db) {
 ### Querying Data
 
 ```c
-#include "db.h"
+#include "ristretto.h"
 
-// Query callback function
+// Query callback function. The callback fires once per matching row; count rows
+// here (there is no COUNT(*) aggregate in the engine).
 void print_user(void* ctx, int n_cols, char** values, char** col_names) {
+    int* row_count = (int*)ctx;
+    if (row_count) (*row_count)++;
     printf("User: ");
     for (int i = 0; i < n_cols; i++) {
         printf("%s=%s ", col_names[i], values[i] ? values[i] : "NULL");
@@ -1098,28 +1175,18 @@ void print_user(void* ctx, int n_cols, char** values, char** col_names) {
     printf("\n");
 }
 
-// Count callback for aggregation
-void count_callback(void* ctx, int n_cols, char** values, char** col_names) {
-    int* count = (int*)ctx;
-    if (values[0]) {
-        *count = atoi(values[0]);
-    }
-}
-
-// Query examples
+// Query examples. Supported WHERE operators: =, !=, <, <=, >, >= and AND/OR.
+// NOTE: LIKE and COUNT(*) are NOT supported. A LIKE query returns an explicit
+// "LIKE operator is not supported yet" error; do substring matching in C instead.
 int query_examples(RistrettoDB* db) {
     printf("All users:\n");
-    ristretto_query(db, "SELECT * FROM users", print_user, NULL);
-    
-    printf("\nUsers with 'Smith' in name:\n");
-    ristretto_query(db, "SELECT * FROM users WHERE name LIKE '%Smith%'", 
-                   print_user, NULL);
-    
-    // Count query
-    int user_count = 0;
-    ristretto_query(db, "SELECT COUNT(*) FROM users", count_callback, &user_count);
-    printf("\nTotal users: %d\n", user_count);
-    
+    int total = 0;
+    ristretto_query(db, "SELECT * FROM users", print_user, &total);
+    printf("Total users: %d\n", total);
+
+    printf("\nUsers with id >= 2:\n");
+    ristretto_query(db, "SELECT * FROM users WHERE id >= 2", print_user, NULL);
+
     return 0;
 }
 ```
@@ -1127,7 +1194,7 @@ int query_examples(RistrettoDB* db) {
 ### Error Handling
 
 ```c
-#include "db.h"
+#include "ristretto.h"
 
 int robust_database_operation(const char* db_path) {
     RistrettoDB* db = ristretto_open(db_path);
@@ -1225,6 +1292,23 @@ void logger_destroy(Logger* logger) {
 
 ## Table V2 Ultra-Fast API
 
+> **Headers.** The `table_*` / `value_*` names are available through the public
+> `#include "ristretto.h"` (via its compatibility layer), where `Table`/`RistrettoTable`
+> is an **opaque** handle. The examples below that read internal fields
+> (`table->header->column_count`, `table->mapped_size`, `table->rows_since_sync`, ...)
+> include the engine header `#include "table_v2.h"` instead, which defines the full
+> `Table` struct and is available when you build against the source tree.
+>
+> **Behavior to know.** `table_create` (two-argument) **truncates** any existing file;
+> use `table_create_ex(name, schema, base_dir, RDB_CREATE_NEW)` for a non-destructive
+> create and `table_open`/`table_open_ex` to resume an existing file. `table_select`
+> **ignores** its `where_clause` (there is no expression parser) — it scans every row,
+> so filter inside your callback. A value written as NULL reads back as the column's
+> zero value (`0`, `0.0`, or `""`); NULL-ness is not persisted. Writes flush
+> asynchronously; `table_close` does a durable `msync(MS_SYNC)` + `fsync`, and
+> `table_flush_durable` forces one on demand — but there is no WAL, so a crash mid-run
+> can lose rows written since the last sync.
+
 ### Basic Setup
 
 ```c
@@ -1241,7 +1325,7 @@ int main() {
         return 1;
     }
     
-    printf("Table created with %zu columns\n", table->header->column_count);
+    printf("Table created with %u columns\n", table->header->column_count);
     printf("Row size: %u bytes\n", table->header->row_size);
     
     table_close(table);
@@ -1451,7 +1535,8 @@ typedef struct {
     int target_user_id;
 } QueryContext;
 
-// Callback function for table scanning
+// Callback function for table scanning. table_select ignores its WHERE argument,
+// so the scan visits EVERY row; apply the filter here in the callback.
 void user_events_callback(void* ctx, const Value* row) {
     QueryContext* query_ctx = (QueryContext*)ctx;
     
@@ -1461,14 +1546,14 @@ void user_events_callback(void* ctx, const Value* row) {
         
         query_ctx->count++;
         
-        printf("Event: timestamp=%ld, user_id=%ld, event=%s\n",
-               row[0].value.integer,
-               row[1].value.integer,
+        printf("Event: timestamp=%lld, user_id=%lld, event=%s\n",
+               (long long)row[0].value.integer,
+               (long long)row[1].value.integer,
                row[2].value.text.data);
     }
 }
 
-// Query example
+// Query example. Passing NULL (or any string) as the WHERE clause scans all rows.
 int query_user_events(Table* table, int user_id) {
     QueryContext ctx = { .count = 0, .target_user_id = user_id };
     
@@ -2736,7 +2821,7 @@ RUN apk add --no-cache gcc musl-dev make git
 # Build RistrettoDB
 WORKDIR /build
 COPY . .
-RUN make lib
+RUN make libraries
 
 # Production stage
 FROM alpine:latest
@@ -3249,7 +3334,8 @@ int config_set_string(ConfigManager* cm, const char* key, const char* value,
 
 ### Comprehensive Test Suite
 
-RistrettoDB includes a comprehensive test suite that validates all examples in this programming manual:
+RistrettoDB includes a comprehensive test suite that validates the **Table V2**
+examples and claims in this programming manual:
 
 ```bash
 # Run the comprehensive test suite
@@ -3257,7 +3343,7 @@ make test-comprehensive
 ```
 
 **What it tests:**
-- All Table V2 API examples from this manual
+- Table V2 API examples from this manual
 - Schema parsing and value type handling
 - High-speed insertion performance claims
 - Memory management best practices
@@ -3287,9 +3373,14 @@ Failed: 0
 # Individual test suites
 make test-v2        # Table V2 basic functionality
 make test-stress    # High-volume stress testing
-make test-original  # Original SQL API validation
+make test-original  # Original SQL API (see note below)
 make test-all       # Run all test suites
 ```
+
+> **`make test-original` reports a known 2 pass / 6 fail baseline.** The 6 failures
+> (reopen-persistence, `COUNT(*)`, `LIKE`) are manifestations of the Original SQL API's
+> documented limits (in-memory/per-process, single-page storage, no aggregates/`LIKE`),
+> **not** regressions. `make test-all` therefore exits non-zero because of this suite.
 
 ### Performance Validation
 
@@ -3307,8 +3398,10 @@ The test suite validates these performance claims:
 
 This programming manual provides comprehensive examples for both RistrettoDB APIs:
 
-- **Original SQL API**: Best for general embedded SQL needs with 2.8x SQLite performance
-- **Table V2 Ultra-Fast API**: Best for high-speed writes with 4.6M rows/sec performance
+- **Original SQL API**: a small SQL-string surface for transient, in-process data
+  (in-memory/per-process, single-page, limited `WHERE`; not a persistent store)
+- **Table V2 Ultra-Fast API**: the durable, high-speed path — 4.6M rows/sec,
+  mmap-backed, append-only (scan-only reads, `WHERE` filtered in your code)
 
 ### Key Takeaways
 
