@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <sys/file.h>   // flock
 #include <time.h>
 #include <errno.h>
 
@@ -16,12 +17,19 @@ uint64_t get_time_ms(void) {
     return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-bool create_data_directory(void) {
+bool create_data_directory_in(const char *base_dir) {
+    if (!base_dir) base_dir = "data";
     struct stat st = {0};
-    if (stat("data", &st) == -1) {
-        return mkdir("data", 0755) == 0;
+    if (stat(base_dir, &st) == -1) {
+        if (mkdir(base_dir, 0755) == 0) return true;
+        // Tolerate a concurrent creator.
+        return errno == EEXIST;
     }
     return true;
+}
+
+bool create_data_directory(void) {
+    return create_data_directory_in("data");
 }
 
 // Value constructors
@@ -146,15 +154,19 @@ bool table_parse_schema(const char *schema_sql, ColumnDesc *columns,
     return *column_count > 0;
 }
 
-// Table creation
-Table* table_create(const char *name, const char *schema_sql) {
-    if (!create_data_directory()) {
+// Table creation (extended)
+Table* table_create_ex(const char *name, const char *schema_sql,
+                       const char *base_dir, int open_mode) {
+    if (!name || !schema_sql) return NULL;
+    if (!base_dir) base_dir = "data";
+
+    if (!create_data_directory_in(base_dir)) {
         return NULL;
     }
-    
+
     Table *table = calloc(1, sizeof(Table));
     if (!table) return NULL;
-    
+
     // Parse schema into temporary variables
     ColumnDesc temp_columns[MAX_COLUMNS];
     uint32_t temp_column_count, temp_row_size;
@@ -162,18 +174,53 @@ Table* table_create(const char *name, const char *schema_sql) {
         free(table);
         return NULL;
     }
-    
+
     // Create file path
-    snprintf(table->file_path, sizeof(table->file_path), "data/%s.rdb", name);
+    snprintf(table->file_path, sizeof(table->file_path), "%s/%s.rdb", base_dir, name);
     strncpy(table->name, name, sizeof(table->name) - 1);
-    
+
+    // RDB_OPEN_OR_CREATE: resume an existing table rather than recreating it.
+    if (open_mode == RDB_OPEN_OR_CREATE) {
+        struct stat existing;
+        if (stat(table->file_path, &existing) == 0 &&
+            existing.st_size >= (off_t)TABLE_HEADER_SIZE) {
+            free(table);
+            return table_open_ex(name, base_dir);
+        }
+    }
+
+    // Select open flags based on the requested mode.
+    int flags = O_CREAT | O_RDWR;
+    switch (open_mode) {
+        case RDB_CREATE_NEW:         flags |= O_EXCL;  break; // fail if exists
+        case RDB_OPEN_OR_CREATE:     /* no O_TRUNC, no O_EXCL */ break;
+        case RDB_CREATE_OR_TRUNCATE:
+        default:                     flags |= O_TRUNC; break;
+    }
+
     // Create and open file
-    table->fd = open(table->file_path, O_CREAT | O_RDWR | O_TRUNC, 0644);
+    table->fd = open(table->file_path, flags, 0644);
     if (table->fd == -1) {
+        if (open_mode == RDB_CREATE_NEW && errno == EEXIST) {
+            fprintf(stderr, "table_create: '%s' already exists (RDB_CREATE_NEW)\n",
+                    table->file_path);
+        }
         free(table);
         return NULL;
     }
-    
+
+    // Advisory single-writer lock. NB: advisory only, and a no-op on some
+    // network filesystems (NFS/SMB); released implicitly on close(fd).
+    if (flock(table->fd, LOCK_EX | LOCK_NB) == -1) {
+        if (errno == EWOULDBLOCK) {
+            fprintf(stderr, "table_create: '%s' locked by another process\n",
+                    table->file_path);
+        }
+        close(table->fd);
+        free(table);
+        return NULL;
+    }
+
     // Set initial file size
     if (ftruncate(table->fd, INITIAL_FILE_SIZE) == -1) {
         close(table->fd);
@@ -206,26 +253,47 @@ Table* table_create(const char *name, const char *schema_sql) {
     
     table->rows_since_sync = 0;
     table->last_sync_time_ms = get_time_ms();
-    
+
     return table;
 }
 
-// Table opening
-Table* table_open(const char *name) {
+// Table creation. Convenience wrapper: stores under "data/" and TRUNCATES any
+// existing file. For non-destructive creation use table_create_ex with
+// RDB_CREATE_NEW, and pass a base_dir to control the storage location.
+Table* table_create(const char *name, const char *schema_sql) {
+    return table_create_ex(name, schema_sql, "data", RDB_CREATE_OR_TRUNCATE);
+}
+
+// Table opening (extended)
+Table* table_open_ex(const char *name, const char *base_dir) {
+    if (!name) return NULL;
+    if (!base_dir) base_dir = "data";
+
     Table *table = calloc(1, sizeof(Table));
     if (!table) return NULL;
-    
+
     // Create file path
-    snprintf(table->file_path, sizeof(table->file_path), "data/%s.rdb", name);
+    snprintf(table->file_path, sizeof(table->file_path), "%s/%s.rdb", base_dir, name);
     strncpy(table->name, name, sizeof(table->name) - 1);
-    
+
     // Open existing file
     table->fd = open(table->file_path, O_RDWR);
     if (table->fd == -1) {
         free(table);
         return NULL;
     }
-    
+
+    // Advisory single-writer lock (see table_create_ex).
+    if (flock(table->fd, LOCK_EX | LOCK_NB) == -1) {
+        if (errno == EWOULDBLOCK) {
+            fprintf(stderr, "table_open: '%s' locked by another process\n",
+                    table->file_path);
+        }
+        close(table->fd);
+        free(table);
+        return NULL;
+    }
+
     // Get file size
     struct stat st;
     if (fstat(table->fd, &st) == -1) {
@@ -265,24 +333,36 @@ Table* table_open(const char *name) {
     table->write_offset = TABLE_HEADER_SIZE + (table->header->num_rows * table->header->row_size);
     table->rows_since_sync = 0;
     table->last_sync_time_ms = get_time_ms();
-    
+
     return table;
+}
+
+// Table opening. Convenience wrapper: resumes "data/<name>.rdb".
+Table* table_open(const char *name) {
+    return table_open_ex(name, "data");
 }
 
 // Table closing
 void table_close(Table *table) {
     if (!table) return;
-    
-    table_flush(table);
-    
+
+    // Durable flush at close so a reopen sees every committed row (covers the
+    // header region, making num_rows durable). Runs once, before munmap.
+    if (table->mapped_ptr && table->mapped_ptr != MAP_FAILED) {
+        msync(table->mapped_ptr, table->write_offset, MS_SYNC);
+    }
+    if (table->fd != -1) {
+        fsync(table->fd);
+    }
+
     if (table->mapped_ptr && table->mapped_ptr != MAP_FAILED) {
         munmap(table->mapped_ptr, table->mapped_size);
     }
-    
+
     if (table->fd != -1) {
-        close(table->fd);
+        close(table->fd);  // also releases the advisory flock
     }
-    
+
     free(table);
 }
 
@@ -345,10 +425,15 @@ bool table_pack_row(Table *table, const Value *values, uint8_t *row_buffer) {
                 break;
                 
             case COL_TYPE_TEXT:
+                // Guard zero-width TEXT: col->length is uint8_t, so col->length-1
+                // would wrap to a huge size_t and defeat the clamp below.
+                if (col->length == 0) {
+                    break;
+                }
                 if (val->value.text.data) {
                     size_t copy_len = val->value.text.length;
-                    if (copy_len > col->length - 1) {
-                        copy_len = col->length - 1;
+                    if (copy_len > (size_t)(col->length - 1)) {
+                        copy_len = (size_t)(col->length - 1);
                     }
                     memcpy(dest, val->value.text.data, copy_len);
                     dest[copy_len] = '\0';
@@ -401,10 +486,11 @@ bool table_unpack_row(Table *table, const uint8_t *row_buffer, Value *values) {
     return true;
 }
 
-// Ultra-fast row insertion
+// Ultra-fast row insertion. Trusts that values[] holds exactly
+// header->column_count entries; use table_append_row_n to validate the count.
 bool table_append_row(Table *table, const Value *values) {
-    if (!table || !values) return false;
-    
+    if (!table || !values || table->header->column_count == 0) return false;
+
     // Ensure we have space for the row
     if (!table_ensure_space(table, table->header->row_size)) {
         return false;
@@ -431,18 +517,47 @@ bool table_append_row(Table *table, const Value *values) {
     return true;
 }
 
-// Sync and durability
+// Count-checked row insertion. Rejects a values[] array whose length does not
+// match the column count (prevents out-of-bounds reads in table_pack_row).
+bool table_append_row_n(Table *table, const Value *values, uint32_t value_count) {
+    if (!table || !values) return false;
+    if (value_count != table->header->column_count) {
+        fprintf(stderr, "table_append_row_n: expected %u values, got %u\n",
+                table->header->column_count, value_count);
+        return false;
+    }
+    return table_append_row(table, values);
+}
+
+// Sync and durability (fast, asynchronous).
 bool table_flush(Table *table) {
     if (!table || !table->mapped_ptr) return false;
-    
+
     // Sync memory-mapped region
     if (msync(table->mapped_ptr, table->write_offset, MS_ASYNC) == -1) {
         return false;
     }
-    
+
     table->rows_since_sync = 0;
     table->last_sync_time_ms = get_time_ms();
-    
+
+    return true;
+}
+
+// Durable flush: synchronous msync + fsync. Use when the caller needs the data
+// on stable storage; table_close also flushes durably.
+bool table_flush_durable(Table *table) {
+    if (!table || !table->mapped_ptr) return false;
+
+    if (msync(table->mapped_ptr, table->write_offset, MS_SYNC) == -1) {
+        return false;
+    }
+    if (table->fd != -1 && fsync(table->fd) == -1) {
+        return false;
+    }
+
+    table->rows_since_sync = 0;
+    table->last_sync_time_ms = get_time_ms();
     return true;
 }
 

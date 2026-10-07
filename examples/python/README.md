@@ -25,7 +25,7 @@ High-performance Python bindings for RistrettoDB, the tiny, blazingly fast, embe
 ```bash
 # From the RistrettoDB root directory
 cd ../../
-make lib
+make dynamic
 ```
 
 ### 2. Run the Example
@@ -184,14 +184,14 @@ with RistrettoDB("audit.db") as db:
 ## Requirements
 
 - Python 3.6+
-- RistrettoDB library built (`make lib`)
+- RistrettoDB library built (`make dynamic`)
 - POSIX-compliant system (Linux, macOS, BSD)
 
 ## Installation
 
 1. **Build RistrettoDB**:
    ```bash
-   cd ../../ && make lib
+   cd ../../ && make dynamic
    ```
 
 2. **Copy Python bindings**:
@@ -234,7 +234,7 @@ RuntimeError: Could not find libristretto.so
 ```
 **Solution**: Build the library first:
 ```bash
-cd ../../ && make lib
+cd ../../ && make dynamic
 ```
 
 ### Permission Denied

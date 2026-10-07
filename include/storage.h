@@ -25,7 +25,7 @@ typedef struct {
             size_t len;
         } text;
     } value;
-} Value;
+} SqlValue;
 
 typedef struct {
     char name[32];
@@ -43,7 +43,7 @@ typedef struct {
     uint32_t row_count;
     uint32_t next_row_id;
     struct BTree *primary_index; // B-tree index on first INTEGER column (if exists)
-} Table;
+} SqlTable;
 
 typedef struct {
     uint32_t page_id;
@@ -55,25 +55,25 @@ typedef struct {
     size_t size;
 } Row;
 
-Table* storage_table_create(const char *name);
-void storage_table_destroy(Table *table);
+SqlTable* storage_table_create(const char *name);
+void storage_table_destroy(SqlTable *table);
 
-void storage_table_add_column(Table *table, const char *name, DataType type);
+void storage_table_add_column(SqlTable *table, const char *name, DataType type);
 
-Row* storage_row_create(Table *table);
+Row* storage_row_create(SqlTable *table);
 void storage_row_destroy(Row *row);
 
-void storage_row_set_value(Row *row, Table *table, uint32_t col_index, Value *value);
-Value* storage_row_get_value(Row *row, Table *table, uint32_t col_index);
-void storage_value_destroy(Value *value);
+void storage_row_set_value(Row *row, SqlTable *table, uint32_t col_index, SqlValue *value);
+SqlValue* storage_row_get_value(Row *row, SqlTable *table, uint32_t col_index);
+void storage_value_destroy(SqlValue *value);
 
-// Table storage operations
-RowId table_insert_row(Table *table, Pager *pager, Row *row);
-Row* table_get_row(Table *table, Pager *pager, RowId row_id);
+// SqlTable storage operations
+RowId table_insert_row(SqlTable *table, Pager *pager, Row *row);
+Row* table_get_row(SqlTable *table, Pager *pager, RowId row_id);
 
-// Table scanning
+// SqlTable scanning
 typedef struct {
-    Table *table;
+    SqlTable *table;
     Pager *pager;
     uint32_t current_page;
     uint32_t current_offset;
@@ -81,7 +81,7 @@ typedef struct {
     bool at_end;
 } TableScanner;
 
-TableScanner* table_scanner_create(Table *table, Pager *pager);
+TableScanner* table_scanner_create(SqlTable *table, Pager *pager);
 void table_scanner_destroy(TableScanner *scanner);
 Row* table_scanner_next(TableScanner *scanner);
 bool table_scanner_at_end(TableScanner *scanner);

@@ -26,6 +26,7 @@ typedef enum {
     OP_LE,
     OP_GT,
     OP_GE,
+    OP_LIKE,   // recognized but not yet evaluable (surfaced as an error)
     OP_AND,
     OP_OR
 } BinaryOp;
@@ -33,7 +34,7 @@ typedef enum {
 typedef struct Expr {
     ExprType type;
     union {
-        Value literal;
+        SqlValue literal;
         struct {
             char *table;
             char *column;
@@ -58,7 +59,7 @@ typedef struct {
 typedef struct {
     char *table_name;
     uint32_t value_count;
-    Value *values;
+    SqlValue *values;
 } InsertStmt;
 
 typedef struct {

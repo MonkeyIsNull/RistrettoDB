@@ -116,6 +116,7 @@ def create_embedded():
         'src/parser.c',       # SQL parser
         'src/query.c',        # Query execution
         'src/db.c',           # Top-level API
+        'src/ristretto_api.c',# Exported ristretto_* Table V2 wrappers
     ]
     
     # Track processed files to avoid duplicates
@@ -123,7 +124,18 @@ def create_embedded():
     
     # Start building the embedded
     embedded = []
-    
+
+    # Feature-test macro: must precede every #include. Under a strict
+    # -std=c11 on glibc (Linux), POSIX/BSD functions used by the storage
+    # engine (ftruncate, fsync, flock, mmap/msync) are hidden unless a
+    # feature-test macro is defined. _DEFAULT_SOURCE exposes them and is a
+    # harmless no-op on macOS/BSD. This keeps `clang -std=c11 ristretto.c`
+    # compiling standalone for embedders regardless of their own flags.
+    embedded.append("""#if !defined(_DEFAULT_SOURCE)
+#define _DEFAULT_SOURCE 1
+#endif
+""")
+
     # Header comment
     embedded.append("""/*
 ** RistrettoDB Embedded
@@ -166,6 +178,18 @@ def create_embedded():
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <assert.h>
+
+/*
+** Pre-define the internal headers' include guards whose bodies would otherwise
+** redeclare the public SQL symbols defined below (db.h declares RistrettoDB,
+** RistrettoResult, RistrettoCallback and the ristretto_* SQL prototypes). The
+** inlined copies carry their own guards, so defining these here makes the
+** compiler skip the inlined bodies and keeps the single public definition.
+*/
+#ifndef RISTRETTO_DB_H
+#define RISTRETTO_DB_H
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -207,17 +231,17 @@ RistrettoResult ristretto_query(RistrettoDB* db, const char* sql, RistrettoCallb
 const char* ristretto_error_string(RistrettoResult result);
 
 /*
-** Table V2 API Constants
+** Table V2 API Constants (must match the internal table_v2.h values)
 */
 #define RISTRETTO_MAX_COLUMNS 14
-#define RISTRETTO_MAX_COLUMN_NAME 8
-#define RISTRETTO_TABLE_HEADER_SIZE 256
+#define RISTRETTO_MAX_COLUMN_NAME 32
+#define RISTRETTO_TABLE_HEADER_SIZE 1024
 #define RISTRETTO_INITIAL_FILE_SIZE (1024 * 1024)
 #define RISTRETTO_GROWTH_FACTOR 2
 #define RISTRETTO_SYNC_INTERVAL_ROWS 512
 #define RISTRETTO_SYNC_INTERVAL_MS 100
 #define RISTRETTO_TABLE_MAGIC "RSTRDB\\x00\\x00"
-#define RISTRETTO_TABLE_VERSION 1
+#define RISTRETTO_TABLE_VERSION 2
 
 typedef enum {
     RISTRETTO_COL_INTEGER = 1,
@@ -225,6 +249,12 @@ typedef enum {
     RISTRETTO_COL_TEXT = 3,
     RISTRETTO_COL_NULLABLE = 4
 } RistrettoColumnType;
+
+typedef enum {
+    RISTRETTO_CREATE_NEW = 0,
+    RISTRETTO_CREATE_OR_TRUNCATE = 1,
+    RISTRETTO_OPEN_OR_CREATE = 2
+} RistrettoOpenMode;
 
 typedef struct RistrettoTable RistrettoTable;
 
@@ -249,18 +279,43 @@ typedef struct {
     uint8_t reserved[4];
 } RistrettoColumnDesc;
 
+typedef struct {
+    char magic[8];
+    uint32_t version;
+    uint32_t row_size;
+    uint64_t num_rows;
+    uint32_t column_count;
+    uint8_t reserved[12];
+    RistrettoColumnDesc columns[RISTRETTO_MAX_COLUMNS];
+} RistrettoTableHeader;
+
+_Static_assert(RISTRETTO_TABLE_HEADER_SIZE >= sizeof(RistrettoTableHeader),
+               "row data must not overlap the table header");
+
 /*
 ** Table V2 API Functions
 */
 RistrettoTable* ristretto_table_create(const char *name, const char *schema_sql);
 RistrettoTable* ristretto_table_open(const char *name);
+RistrettoTable* ristretto_table_create_ex(const char *name, const char *schema_sql,
+                                          const char *base_dir, int open_mode);
+RistrettoTable* ristretto_table_open_ex(const char *name, const char *base_dir);
 void ristretto_table_close(RistrettoTable *table);
 
 bool ristretto_table_append_row(RistrettoTable *table, const RistrettoValue *values);
+bool ristretto_table_append_row_n(RistrettoTable *table, const RistrettoValue *values,
+                                  uint32_t value_count);
 bool ristretto_table_select(RistrettoTable *table, const char *where_clause,
                            void (*callback)(void *ctx, const RistrettoValue *row), void *ctx);
 
 bool ristretto_table_flush(RistrettoTable *table);
+bool ristretto_table_flush_durable(RistrettoTable *table);
+bool ristretto_table_remap(RistrettoTable *table);
+bool ristretto_table_ensure_space(RistrettoTable *table, size_t needed_bytes);
+
+bool ristretto_table_parse_schema(const char *schema_sql, RistrettoColumnDesc *columns,
+                                 uint32_t *column_count, uint32_t *row_size);
+const RistrettoColumnDesc* ristretto_table_get_column(RistrettoTable *table, const char *name);
 size_t ristretto_table_get_row_count(RistrettoTable *table);
 
 RistrettoValue ristretto_value_integer(int64_t val);
@@ -269,41 +324,19 @@ RistrettoValue ristretto_value_text(const char *str);
 RistrettoValue ristretto_value_null(void);
 void ristretto_value_destroy(RistrettoValue *value);
 
+bool ristretto_table_pack_row(RistrettoTable *table, const RistrettoValue *values, uint8_t *row_buffer);
+bool ristretto_table_unpack_row(RistrettoTable *table, const uint8_t *row_buffer, RistrettoValue *values);
+
+uint64_t ristretto_get_time_ms(void);
+bool ristretto_create_data_directory(void);
+
 /*
-** Compatibility layer (when using embedded)
+** NOTE: The amalgamation deliberately omits the user-facing compatibility
+** macros (#define table_create ristretto_table_create, #define Value
+** RistrettoValue, ...). In a single translation unit they would rewrite the
+** inlined internal engine bodies (which define Value / table_create / ...) and
+** collide. Embedding code should call the ristretto_*-prefixed API directly.
 */
-#define RistrettoDB                  RistrettoDB
-#define RistrettoResult              RistrettoResult
-#define RistrettoCallback            RistrettoCallback
-#define ristretto_open               ristretto_open
-#define ristretto_close              ristretto_close
-#define ristretto_exec               ristretto_exec
-#define ristretto_query              ristretto_query
-#define ristretto_error_string       ristretto_error_string
-
-#define Table                        RistrettoTable
-#define Value                        RistrettoValue
-#define ColumnDesc                   RistrettoColumnDesc
-#define ColumnType                   RistrettoColumnType
-#define COL_TYPE_INTEGER             RISTRETTO_COL_INTEGER
-#define COL_TYPE_REAL                RISTRETTO_COL_REAL
-#define COL_TYPE_TEXT                RISTRETTO_COL_TEXT
-#define COL_TYPE_NULLABLE            RISTRETTO_COL_NULLABLE
-#define MAX_COLUMNS                  RISTRETTO_MAX_COLUMNS
-#define MAX_COLUMN_NAME              RISTRETTO_MAX_COLUMN_NAME
-
-#define table_create                 ristretto_table_create
-#define table_open                   ristretto_table_open
-#define table_close                  ristretto_table_close
-#define table_append_row             ristretto_table_append_row
-#define table_select                 ristretto_table_select
-#define table_flush                  ristretto_table_flush
-#define table_get_row_count          ristretto_table_get_row_count
-#define value_integer                ristretto_value_integer
-#define value_real                   ristretto_value_real
-#define value_text                   ristretto_value_text
-#define value_null                   ristretto_value_null
-#define value_destroy                ristretto_value_destroy
 
 #ifdef __cplusplus
 }
@@ -321,8 +354,10 @@ void ristretto_value_destroy(RistrettoValue *value);
 #include <stddef.h>
 #include <stdbool.h>
 #include <assert.h>
+#include <ctype.h>
 #include <time.h>
 #include <sys/mman.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -368,8 +403,8 @@ void ristretto_value_destroy(RistrettoValue *value);
     # Combine everything
     final_content = ''.join(embedded)
     
-    # Write the embedded file
-    output_path = project_root / 'ristretto.c'
+    # Write the embedded file (the distributed amalgamation lives in embed/)
+    output_path = project_root / 'embed' / 'ristretto.c'
     
     if write_file(output_path, final_content):
         print(f"\nEmbedded created successfully!")

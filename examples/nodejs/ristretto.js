@@ -1,305 +1,219 @@
 /**
- * RistrettoDB Node.js Bindings
- * 
- * A tiny, blazingly fast, embeddable SQL engine with Node.js bindings.
- * Provides both Original SQL API (2.8x faster than SQLite) and 
- * Ultra-Fast Table V2 API (4.57x faster than SQLite).
- * 
+ * RistrettoDB Node.js Bindings (koffi)
+ *
+ * A tiny, embeddable SQL engine. Exposes the Original SQL API
+ * (RistrettoDB: open/exec/query/close) and the append-only Table V2 API
+ * (RistrettoTable: create/open/appendRow/getRowCount/close).
+ *
+ * Requires Node >= 18 and the `koffi` FFI package (prebuilt, no native build).
+ * Build the shared library first:  make dynamic   (from the repo root).
+ *
  * @example
- * const { RistrettoDB, RistrettoTable, RistrettoValue } = require('./ristretto');
- * 
- * // Original SQL API
- * const db = new RistrettoDB('mydb.db');
- * db.exec('CREATE TABLE test (id INTEGER, name TEXT)');
- * db.exec("INSERT INTO test VALUES (1, 'Hello')");
- * const results = db.query('SELECT * FROM test');
- * db.close();
- * 
- * // Ultra-Fast Table V2 API
- * const table = RistrettoTable.create('events', 
- *   'CREATE TABLE events (timestamp INTEGER, event TEXT(32))');
- * table.appendRow([
- *   RistrettoValue.integer(1672531200),
- *   RistrettoValue.text('user_login')
- * ]);
- * table.close();
+ *   const { RistrettoTable, RistrettoValue } = require('./ristretto');
+ *   const t = RistrettoTable.create('events',
+ *     'CREATE TABLE events (timestamp INTEGER, event TEXT(32))');
+ *   t.appendRow([RistrettoValue.integer(1672531200), RistrettoValue.text('login')]);
+ *   t.close();
  */
 
-const ffi = require('ffi-napi');
-const ref = require('ref-napi');
+'use strict';
+
+const koffi = require('koffi');
 const path = require('path');
 const fs = require('fs');
 
-// Type definitions
-const voidPtr = ref.refType(ref.types.void);
-const charPtr = ref.refType(ref.types.char);
-const charPtrPtr = ref.refType(charPtr);
-
-// Find the RistrettoDB library
+// ---- Locate the shared library (relative to this file) ---------------------
 function findLibrary() {
-  const libPaths = [
-    path.join(__dirname, '../../lib/libristretto.so'),
-    path.join(__dirname, '../../lib/libristretto.dylib'),
-    path.join(__dirname, '../../../lib/libristretto.so'),
-    path.join(__dirname, '../../../lib/libristretto.dylib'),
-    '/usr/local/lib/libristretto.so',
-    '/usr/local/lib/libristretto.dylib',
-    '/usr/lib/libristretto.so',
-    'libristretto.so',
-    'libristretto.dylib'
-  ];
-
-  for (const libPath of libPaths) {
-    if (fs.existsSync(libPath)) {
-      return libPath;
-    }
+  const here = __dirname;
+  const repoLib = path.join(here, '..', '..', 'lib');
+  const names = ['libristretto.so', 'libristretto.dylib'];
+  const candidates = [];
+  for (const n of names) {
+    candidates.push(path.join(repoLib, n));
+    candidates.push(path.join(here, n));
   }
-
+  candidates.push('/usr/local/lib/libristretto.so',
+                  '/usr/local/lib/libristretto.dylib',
+                  '/usr/lib/libristretto.so');
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
   throw new Error(
-    'Could not find libristretto.so or libristretto.dylib. ' +
-    'Please ensure RistrettoDB is built:\\n' +
-    '  cd ../../ && make lib\\n' +
-    '  Or install system-wide: sudo cp lib/libristretto.so /usr/local/lib/'
-  );
+    'Could not find libristretto shared library. Build it first:\n' +
+    '  cd <repo root> && make dynamic\n' +
+    '  (lib/libristretto.so on Linux, lib/libristretto.dylib on macOS)');
 }
 
-// Load the library
 const libPath = findLibrary();
-const lib = ffi.Library(libPath, {
-  // Version functions
-  'ristretto_version': ['string', []],
-  'ristretto_version_number': ['int', []],
-  
-  // Original SQL API
-  'ristretto_open': [voidPtr, ['string']],
-  'ristretto_close': ['void', [voidPtr]],
-  'ristretto_exec': ['int', [voidPtr, 'string']],
-  'ristretto_query': ['int', [voidPtr, 'string', 'pointer', voidPtr]],
-  'ristretto_error_string': ['string', ['int']],
-  
-  // Table V2 API
-  'ristretto_table_create': [voidPtr, ['string', 'string']],
-  'ristretto_table_open': [voidPtr, ['string']],
-  'ristretto_table_close': ['void', [voidPtr]],
-  'ristretto_table_get_row_count': ['size_t', [voidPtr]],
-  'ristretto_table_append_row': ['bool', [voidPtr, 'pointer']],
-  
-  // Value functions
-  'ristretto_value_integer': ['void', ['int64']],  // Returns by value
-  'ristretto_value_real': ['void', ['double']],    // Returns by value
-  'ristretto_value_text': ['void', ['string']],    // Returns by value
-  'ristretto_value_null': ['void', []],            // Returns by value
-  'ristretto_value_destroy': ['void', ['pointer']]
+const lib = koffi.load(libPath);
+
+// ---- Types -----------------------------------------------------------------
+// RistrettoValue: { int type; union { int64 | double | {void* data; size_t len} }; bool is_null; }
+const RText = koffi.struct('RText', { data: 'void *', length: 'size_t' });
+const RValueUnion = koffi.union('RValueUnion', {
+  integer: 'int64_t',
+  real: 'double',
+  text: RText,
+});
+const CValue = koffi.struct('RistrettoValueC', {
+  type: 'int',
+  value: RValueUnion,
+  is_null: 'bool',
 });
 
-// Result codes enum
+if (koffi.sizeof(CValue) !== 32) {
+  throw new Error(`RistrettoValue ABI mismatch: expected 32 bytes, got ${koffi.sizeof(CValue)}`);
+}
+
+const QueryCallback = koffi.proto(
+  'void RistrettoQueryCallback(void *ctx, int nCols, char **values, char **colNames)');
+
+// ---- Function bindings -----------------------------------------------------
+const c = {
+  version: lib.func('const char *ristretto_version(void)'),
+  versionNumber: lib.func('int ristretto_version_number(void)'),
+
+  open: lib.func('void *ristretto_open(const char *filename)'),
+  close: lib.func('void ristretto_close(void *db)'),
+  exec: lib.func('int ristretto_exec(void *db, const char *sql)'),
+  query: lib.func('int ristretto_query(void *db, const char *sql, RistrettoQueryCallback *cb, void *ctx)'),
+  errorString: lib.func('const char *ristretto_error_string(int result)'),
+
+  tableCreate: lib.func('void *ristretto_table_create(const char *name, const char *schema)'),
+  tableOpen: lib.func('void *ristretto_table_open(const char *name)'),
+  tableClose: lib.func('void ristretto_table_close(void *table)'),
+  tableRowCount: lib.func('size_t ristretto_table_get_row_count(void *table)'),
+  tableAppendRowN: lib.func('bool ristretto_table_append_row_n(void *table, RistrettoValueC *values, uint32_t n)'),
+};
+
+// ---- Enums / errors --------------------------------------------------------
 const RistrettoResult = {
-  OK: 0,
-  ERROR: -1,
-  NOMEM: -2,
-  IO_ERROR: -3,
-  PARSE_ERROR: -4,
-  NOT_FOUND: -5,
-  CONSTRAINT_ERROR: -6
+  OK: 0, ERROR: -1, NOMEM: -2, IO_ERROR: -3,
+  PARSE_ERROR: -4, NOT_FOUND: -5, CONSTRAINT_ERROR: -6,
 };
 
-// Column types enum
-const RistrettoColumnType = {
-  INTEGER: 1,
-  REAL: 2,
-  TEXT: 3,
-  NULLABLE: 4
-};
+const RistrettoColumnType = { INTEGER: 1, REAL: 2, TEXT: 3, NULLABLE: 4 };
 
-// Custom error class
 class RistrettoError extends Error {
   constructor(resultCode, message = '') {
-    const resultName = Object.keys(RistrettoResult).find(key => 
-      RistrettoResult[key] === resultCode) || 'UNKNOWN';
-    super(`RistrettoDB Error (${resultName}): ${message}`);
+    const name = Object.keys(RistrettoResult).find(k => RistrettoResult[k] === resultCode) || 'UNKNOWN';
+    super(`RistrettoDB Error (${name}): ${message}`);
     this.name = 'RistrettoError';
     this.resultCode = resultCode;
   }
 }
 
-// Value class for Table V2 API
+// ---- Value -----------------------------------------------------------------
 class RistrettoValue {
   constructor(type, value, isNull = false) {
     this.type = type;
     this.value = value;
     this.isNull = isNull;
   }
-
-  static integer(value) {
-    return new RistrettoValue(RistrettoColumnType.INTEGER, value);
-  }
-
-  static real(value) {
-    return new RistrettoValue(RistrettoColumnType.REAL, value);
-  }
-
-  static text(value) {
-    return new RistrettoValue(RistrettoColumnType.TEXT, value);
-  }
-
-  static null() {
-    return new RistrettoValue(RistrettoColumnType.NULLABLE, null, true);
-  }
-
+  static integer(value) { return new RistrettoValue(RistrettoColumnType.INTEGER, value); }
+  static real(value)    { return new RistrettoValue(RistrettoColumnType.REAL, value); }
+  static text(value)    { return new RistrettoValue(RistrettoColumnType.TEXT, value); }
+  static null()         { return new RistrettoValue(RistrettoColumnType.NULLABLE, null, true); }
   toString() {
-    if (this.isNull) {
-      return 'RistrettoValue(NULL)';
-    }
-    const typeName = Object.keys(RistrettoColumnType).find(key => 
-      RistrettoColumnType[key] === this.type);
-    return `RistrettoValue(${typeName}, ${JSON.stringify(this.value)})`;
+    if (this.isNull) return 'RistrettoValue(NULL)';
+    const t = Object.keys(RistrettoColumnType).find(k => RistrettoColumnType[k] === this.type);
+    return `RistrettoValue(${t}, ${JSON.stringify(this.value)})`;
   }
 }
 
-// Original SQL API class
+// Build the C struct object for one value. For TEXT, returns a backing Buffer
+// that must stay referenced until after the append call (the engine copies the
+// bytes into the row during the call).
+function toCValue(v, keepAlive) {
+  if (v.isNull || v.type === RistrettoColumnType.NULLABLE) {
+    return { type: RistrettoColumnType.NULLABLE, value: { integer: 0 }, is_null: true };
+  }
+  switch (v.type) {
+    case RistrettoColumnType.INTEGER:
+      return { type: v.type, value: { integer: Number(v.value) }, is_null: false };
+    case RistrettoColumnType.REAL:
+      return { type: v.type, value: { real: Number(v.value) }, is_null: false };
+    case RistrettoColumnType.TEXT: {
+      const buf = Buffer.from(String(v.value), 'utf8');
+      keepAlive.push(buf);
+      return { type: v.type, value: { text: { data: buf, length: buf.length } }, is_null: false };
+    }
+    default:
+      throw new RistrettoError(RistrettoResult.ERROR, `Unsupported value type: ${v.type}`);
+  }
+}
+
+// ---- Original SQL API ------------------------------------------------------
 class RistrettoDB {
   constructor(filename) {
     this.filename = filename;
-    this._handle = lib.ristretto_open(filename);
-    if (this._handle.isNull()) {
+    this._handle = c.open(filename);
+    if (!this._handle) {
       throw new RistrettoError(RistrettoResult.ERROR, `Failed to open database: ${filename}`);
     }
   }
-
   close() {
-    if (!this._handle.isNull()) {
-      lib.ristretto_close(this._handle);
-      this._handle = ref.NULL;
-    }
+    if (this._handle) { c.close(this._handle); this._handle = null; }
   }
-
   exec(sql) {
-    if (this._handle.isNull()) {
-      throw new RistrettoError(RistrettoResult.ERROR, 'Database is closed');
-    }
-
-    const result = lib.ristretto_exec(this._handle, sql);
-    if (result !== RistrettoResult.OK) {
-      const errorMsg = lib.ristretto_error_string(result);
-      throw new RistrettoError(result, errorMsg);
-    }
+    if (!this._handle) throw new RistrettoError(RistrettoResult.ERROR, 'Database is closed');
+    const r = c.exec(this._handle, sql);
+    if (r !== RistrettoResult.OK) throw new RistrettoError(r, c.errorString(r));
   }
-
   query(sql, callback) {
-    if (this._handle.isNull()) {
-      throw new RistrettoError(RistrettoResult.ERROR, 'Database is closed');
-    }
-
+    if (!this._handle) throw new RistrettoError(RistrettoResult.ERROR, 'Database is closed');
     const results = [];
-
-    // Create callback function for C
-    const cCallback = ffi.Callback('void', [voidPtr, 'int', charPtrPtr, charPtrPtr], 
-      (ctx, nCols, valuesPtr, colNamesPtr) => {
-        try {
-          const values = [];
-          const colNames = [];
-
-          // Extract column names and values
-          for (let i = 0; i < nCols; i++) {
-            // Get column name
-            const colNamePtr = charPtrPtr.get(colNamesPtr, i * ref.sizeof.pointer);
-            const colName = colNamePtr.isNull() ? `col_${i}` : colNamePtr.readCString();
-            colNames.push(colName);
-
-            // Get value
-            const valuePtr = charPtrPtr.get(valuesPtr, i * ref.sizeof.pointer);
-            const value = valuePtr.isNull() ? null : valuePtr.readCString();
-            values.push(value);
-          }
-
-          const row = {};
-          for (let i = 0; i < colNames.length; i++) {
-            row[colNames[i]] = values[i];
-          }
-
-          if (callback) {
-            callback(row);
-          } else {
-            results.push(row);
-          }
-        } catch (error) {
-          console.error('Error in query callback:', error);
-        }
-      });
-
-    const result = lib.ristretto_query(this._handle, sql, cCallback, ref.NULL);
-    if (result !== RistrettoResult.OK) {
-      const errorMsg = lib.ristretto_error_string(result);
-      throw new RistrettoError(result, errorMsg);
+    const cb = koffi.register((ctx, nCols, valuesPtr, colNamesPtr) => {
+      const values = nCols > 0 ? koffi.decode(valuesPtr, 'char *', nCols) : [];
+      const colNames = nCols > 0 ? koffi.decode(colNamesPtr, 'char *', nCols) : [];
+      const row = {};
+      for (let i = 0; i < nCols; i++) row[colNames[i] ?? `col_${i}`] = values[i];
+      if (callback) callback(row); else results.push(row);
+    }, koffi.pointer(QueryCallback));
+    try {
+      const r = c.query(this._handle, sql, cb, null);
+      if (r !== RistrettoResult.OK) throw new RistrettoError(r, c.errorString(r));
+    } finally {
+      koffi.unregister(cb);
     }
-
     return results;
   }
-
-  static version() {
-    return lib.ristretto_version();
-  }
-
-  static versionNumber() {
-    return lib.ristretto_version_number();
-  }
+  static version() { return c.version(); }
+  static versionNumber() { return c.versionNumber(); }
 }
 
-// Table V2 Ultra-Fast API class
+// ---- Table V2 API ----------------------------------------------------------
 class RistrettoTable {
-  constructor(handle, name) {
-    this._handle = handle;
-    this.name = name;
-  }
+  constructor(handle, name) { this._handle = handle; this.name = name; }
 
   static create(name, schemaSql) {
-    const handle = lib.ristretto_table_create(name, schemaSql);
-    if (handle.isNull()) {
-      throw new RistrettoError(RistrettoResult.ERROR, `Failed to create table: ${name}`);
-    }
-    return new RistrettoTable(handle, name);
+    const h = c.tableCreate(name, schemaSql);
+    if (!h) throw new RistrettoError(RistrettoResult.ERROR, `Failed to create table: ${name}`);
+    return new RistrettoTable(h, name);
   }
-
   static open(name) {
-    const handle = lib.ristretto_table_open(name);
-    if (handle.isNull()) {
-      throw new RistrettoError(RistrettoResult.ERROR, `Failed to open table: ${name}`);
-    }
-    return new RistrettoTable(handle, name);
+    const h = c.tableOpen(name);
+    if (!h) throw new RistrettoError(RistrettoResult.ERROR, `Failed to open table: ${name}`);
+    return new RistrettoTable(h, name);
   }
-
   close() {
-    if (!this._handle.isNull()) {
-      lib.ristretto_table_close(this._handle);
-      this._handle = ref.NULL;
-    }
+    if (this._handle) { c.tableClose(this._handle); this._handle = null; }
   }
-
   getRowCount() {
-    if (this._handle.isNull()) {
-      throw new RistrettoError(RistrettoResult.ERROR, 'Table is closed');
-    }
-    return lib.ristretto_table_get_row_count(this._handle);
+    if (!this._handle) throw new RistrettoError(RistrettoResult.ERROR, 'Table is closed');
+    return Number(c.tableRowCount(this._handle));
   }
-
   appendRow(values) {
-    if (this._handle.isNull()) {
-      throw new RistrettoError(RistrettoResult.ERROR, 'Table is closed');
-    }
-
-    // This is a simplified version - full implementation would require
-    // proper struct marshaling for the append operation
-    console.log(`Would append row with ${values.length} values to table '${this.name}':`);
-    values.forEach((value, i) => {
-      console.log(`  Column ${i}: ${value.toString()}`);
-    });
-
-    // TODO: Implement actual C function call with proper struct marshaling
+    if (!this._handle) throw new RistrettoError(RistrettoResult.ERROR, 'Table is closed');
+    const keepAlive = [];
+    const arr = values.map(v => toCValue(v, keepAlive));
+    const ok = c.tableAppendRowN(this._handle, arr, arr.length);
+    // keepAlive buffers stay referenced through this synchronous call.
+    if (!ok) throw new RistrettoError(RistrettoResult.ERROR, `append_row failed for table '${this.name}'`);
     return true;
   }
 }
 
-// Export the API
 module.exports = {
   RistrettoDB,
   RistrettoTable,
@@ -307,9 +221,7 @@ module.exports = {
   RistrettoError,
   RistrettoResult,
   RistrettoColumnType,
-  
-  // Library information
-  version: () => lib.ristretto_version(),
-  versionNumber: () => lib.ristretto_version_number(),
-  libraryPath: libPath
+  version: () => c.version(),
+  versionNumber: () => c.versionNumber(),
+  libraryPath: libPath,
 };

@@ -5,7 +5,7 @@
 ** It demonstrates both the Original SQL API and Table V2 API.
 **
 ** To compile and run:
-**   make lib                    # Build the libraries first
+**   make libraries              # Build the libraries first
 **   gcc -O3 -o simple_embed examples/simple_embed.c -Llib -lristretto
 **   ./simple_embed
 */

@@ -5,7 +5,7 @@
 ** using the APIs exactly as they are exported by the library.
 **
 ** To compile and run:
-**   make lib                    # Build the libraries first
+**   make libraries              # Build the libraries first
 **   gcc -O3 -I. -o examples/embedding_demo examples/embedding_demo.c -Llib -lristretto
 **   ./examples/embedding_demo
 */

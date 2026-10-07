@@ -5,7 +5,7 @@
 ** names that are exported by the library.
 **
 ** To compile and run:
-**   make lib                    # Build the libraries first
+**   make libraries              # Build the libraries first
 **   gcc -O3 -I. -o examples/working_demo examples/working_demo.c -Llib -lristretto
 **   ./examples/working_demo
 */

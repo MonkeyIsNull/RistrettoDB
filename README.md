@@ -11,7 +11,7 @@ A tiny, blazingly fast, **embeddable** SQL engine in C that delivers **4.57x per
 ```bash
 # 1. Clone and build the library
 git clone https://github.com/MonkeyIsNull/RistrettoDB && cd RistrettoDB
-make lib
+make libraries
 
 # 2. Copy the header and link the library
 cp embed/ristretto.h /usr/local/include/
@@ -87,7 +87,7 @@ RistrettoDB is designed for **drop-in embedding** with zero dependencies and a s
 
 ```bash
 # Static library (recommended for embedding)
-make lib && ls -la lib/
+make libraries && ls -la lib/
 # libristretto.a     42KB    # Tiny static library
 # libristretto.so    56KB    # Dynamic library 
 
@@ -209,7 +209,7 @@ COPY ristretto.h /usr/include/
 # GitHub Actions example
 - name: Build with RistrettoDB
   run: |
-    make lib
+    make libraries
     gcc -O3 myapp.c -lristretto -o myapp
     ./myapp
 ```
@@ -374,14 +374,14 @@ Features:
 
 ```bash
 # Build embeddable libraries (recommended)
-make lib                    # Static (.a) and dynamic (.so) libraries
+make libraries              # Static (.a) and dynamic (.so) libraries
 
 # Standard CLI build
 make                        # Build ristretto CLI tool
 
 # Debug builds
 make debug                  # CLI with debug symbols
-make lib-debug             # Libraries with debug symbols
+make debug                 # CLI and libraries with debug symbols
 
 # Distribution builds
 make embedded          # Single-file distribution in dist/
@@ -647,14 +647,75 @@ RistrettoDB excels in scenarios requiring **ultra-fast writes** with **simple sc
 
 ## Current Limitations
 
-- No UPDATE or DELETE operations (insert-only database)
-- No JOINs or subqueries
-- No transactions or concurrency control
-- Single-threaded operation only
-- Limited to fixed schema per table
-- No ALTER TABLE support
-- Text fields limited to 255 characters
-- No foreign keys or constraints
+RistrettoDB is alpha software. The limitations below are deliberate scope
+boundaries, documented honestly so callers can plan around them.
+
+### Original SQL API — in-memory, per-process, single-page
+
+The Original SQL API (`ristretto_open` / `ristretto_exec` / `ristretto_query`)
+is **not** a persistent, cross-process store today:
+
+- **Process-local catalog.** Tables and their rows live in a process-wide
+  in-memory catalog; they are **not** written back to the database file and do
+  **not** persist across `ristretto_open` calls or between processes.
+- **Single page of rows.** Row storage is capped at a single 4 KB page per
+  table, so a table holds only a few hundred rows before inserts fail with an
+  out-of-space error.
+- As a result, `make test-original` reports a known **2 pass / 6 fail**
+  baseline — the 6 failures (reopen-persistence, `COUNT(*)`, `LIKE`) are
+  manifestations of these limits, **not** regressions. Making this a durable
+  storage engine is a planned, separate effort.
+
+### SQL feature set
+
+- Supported in `WHERE`: `=`, `!=`, `<`, `<=`, `>`, `>=` and `AND` / `OR` over
+  INTEGER / REAL / TEXT (INTEGER and REAL compare numerically).
+- **`LIKE` is parsed but not evaluated**: a `WHERE ... LIKE ...` query now
+  returns an explicit "LIKE operator is not supported yet" error instead of
+  silently matching every row (its previous behavior). Real `LIKE` is future
+  work.
+- No `UPDATE` / `DELETE` / `JOIN` / `GROUP BY` / `ORDER BY` / `LIMIT`,
+  no `COUNT(*)`, no `ALTER TABLE`, no foreign keys or constraints.
+- **No bound/parameterized queries.** SQL is built from strings; callers must
+  quote and escape user input themselves (and the parser does not accept
+  escaped quotes), so the string-build path is injection-prone. Parameter
+  binding is future work.
+
+### Table V2 API — durability and concurrency
+
+The Table V2 API (fixed-width, append-only, mmap-backed) is the complete,
+persistent path, with these documented constraints:
+
+- **On-disk format is version 2.** The header region grew from 256 to 1024
+  bytes (fixing a buffer overlap for tables with 8+ columns), so **version-1
+  `.rdb` files are no longer readable** — `table_open` rejects them cleanly by
+  version check rather than corrupting data.
+- **No WAL / crash recovery.** Writes flush asynchronously during a run;
+  `table_close` performs a synchronous `msync(MS_SYNC)` + `fsync`, and
+  `ristretto_table_flush_durable` forces a durable flush on demand. A crash
+  mid-run may lose rows written since the last sync. There is no write-ahead
+  log.
+- **NULL-ness is not persisted.** A value written as NULL reads back as the
+  column's zero value (`0`, `0.0`, or `""`).
+- **Destructive convenience create.** The two-argument `table_create` (and the
+  Go `CreateTable`) **truncates** any existing file. Use
+  `table_create_ex(..., RDB_CREATE_NEW)` (`O_EXCL`) for non-destructive create,
+  and the `base_dir` argument of `table_create_ex` / `table_open_ex` to choose
+  the storage directory (default `data/`).
+- **Single-writer, single-process.** There is no in-process locking beyond what
+  callers add (the Go binding wraps each handle in a `sync.Mutex`). Table V2
+  takes an **advisory** `flock` on the file so a second process opening the same
+  live table fails fast; this lock is advisory only and is a **no-op on some
+  network filesystems (NFS/SMB)**, so it is not a guarantee against corruption.
+  The Original SQL API path takes no such lock (it is in-memory per process).
+- V2 `table_select` ignores its `where_clause` argument (it has no expression
+  parser); scan all rows and filter in the host language.
+
+### General
+
+- Text fields limited to 255 bytes; fixed schema per table (no `ALTER TABLE`).
+- Not portable-by-default-tuned beyond a safe baseline: the build drops
+  `-march=native` for portability; opt into host tuning with `make SIMD=native`.
 
 ## Development
 

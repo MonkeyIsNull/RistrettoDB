@@ -7,7 +7,7 @@
 
 struct RistrettoDB {
     Pager* pager;
-    Table** tables;
+    SqlTable** tables;
     uint32_t table_count;
     uint32_t table_capacity;
 };

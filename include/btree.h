@@ -21,13 +21,13 @@ typedef struct {
     } ptrs;
 } BTreeNode;
 
-typedef struct {
+typedef struct BTree {
     Pager *pager;
     uint32_t root_page;
-    Table *table;
+    SqlTable *table;
 } BTree;
 
-BTree* btree_create(Pager *pager, Table *table);
+BTree* btree_create(Pager *pager, SqlTable *table);
 void btree_destroy(BTree *btree);
 
 bool btree_insert(BTree *btree, uint32_t key, RowId value);

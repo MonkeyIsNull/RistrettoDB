@@ -1,6 +1,20 @@
 CC = clang
-CFLAGS = -O3 -march=native -std=c11 -Wall -Wextra -Wpedantic -Iinclude -Iembed -I.
-LDFLAGS = 
+# Portable baseline by default (no -march=native, which produces binaries that
+# SIGILL on a different microarchitecture). The SIMD paths in src/simd.c use
+# fixed 128-bit clang vector types (NEON on arm64, SSE2 on x86-64) that compile
+# on the baseline without -march=native.
+#
+# Opt in to host-tuned codegen with:  make SIMD=native
+SIMD ?= portable
+# _DEFAULT_SOURCE exposes the POSIX/BSD functions the storage engine uses
+# (ftruncate, fsync, flock, mmap/msync). Under a strict -std=c11 on glibc
+# (Linux) these are hidden without a feature-test macro, which breaks the
+# build; the macro is a harmless no-op on macOS/BSD.
+CFLAGS = -O3 -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Wpedantic -Iinclude -Iembed -I.
+ifeq ($(SIMD),native)
+CFLAGS += -march=native
+endif
+LDFLAGS =
 DEBUGFLAGS = -g -O0 -DDEBUG
 TARGET = ristretto
 TEST_TARGET = test_basic
@@ -8,6 +22,7 @@ TEST_V2_TARGET = test_table_v2
 TEST_COMPREHENSIVE_TARGET = test_comprehensive
 TEST_ORIGINAL_TARGET = test_original_api
 TEST_STRESS_TARGET = test_stress
+TEST_WHERE_TARGET = test_where
 
 # Library targets
 STATIC_LIB = libristretto.a
@@ -37,7 +52,7 @@ HEADERS = $(wildcard $(INCLUDE_DIR)/*.h)
 TEST_SOURCES = $(wildcard $(TEST_DIR)/*.c)
 TEST_OBJECTS = $(patsubst $(TEST_DIR)/%.c,$(BUILD_DIR)/test_%.o,$(TEST_SOURCES))
 
-.PHONY: all clean debug test test-v2 test-comprehensive test-original test-stress test-all run benchmark
+.PHONY: all clean debug test test-basic test-v2 test-comprehensive test-original test-stress test-where test-all run benchmark
 .PHONY: libraries static dynamic install uninstall example
 
 # Default target builds both CLI and libraries
@@ -63,7 +78,7 @@ $(LIB_DIR):
 	mkdir -p $(LIB_DIR)
 
 # Build CLI executable (links against static library)
-$(BIN_DIR)/$(TARGET): $(LIB_DIR)/$(STATIC_LIB) $(CLI_OBJECTS)
+$(BIN_DIR)/$(TARGET): $(LIB_DIR)/$(STATIC_LIB) $(CLI_OBJECTS) | $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ $(CLI_OBJECTS) $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
 
 # Build static library
@@ -86,6 +101,9 @@ $(BUILD_DIR)/test_%.o: $(TEST_DIR)/test_%.c $(HEADERS) | $(BUILD_DIR)
 test: $(BIN_DIR)/$(TEST_TARGET)
 	$(BIN_DIR)/$(TEST_TARGET)
 
+# Alias: `test-basic` reads clearly alongside test-v2 / test-comprehensive / ...
+test-basic: test
+
 test-v2: $(BIN_DIR)/$(TEST_V2_TARGET)
 	$(BIN_DIR)/$(TEST_V2_TARGET)
 
@@ -98,7 +116,10 @@ test-original: $(BIN_DIR)/$(TEST_ORIGINAL_TARGET)
 test-stress: $(BIN_DIR)/$(TEST_STRESS_TARGET)
 	$(BIN_DIR)/$(TEST_STRESS_TARGET)
 
-test-all: test test-v2 test-comprehensive test-original test-stress
+test-where: $(BIN_DIR)/$(TEST_WHERE_TARGET)
+	$(BIN_DIR)/$(TEST_WHERE_TARGET)
+
+test-all: test test-v2 test-comprehensive test-original test-stress test-where
 	@echo ""
 	@echo "ALL TEST SUITES COMPLETED!"
 	@echo "Original API tests"
@@ -108,20 +129,23 @@ test-all: test test-v2 test-comprehensive test-original test-stress
 	@echo "Stress and performance tests"
 
 # Test executables (link against static library)
-$(BIN_DIR)/$(TEST_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_basic.o
-	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_basic.o -L$(LIB_DIR) -lristretto $(LDFLAGS)
+$(BIN_DIR)/$(TEST_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_basic.o | $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_basic.o $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
 
-$(BIN_DIR)/$(TEST_V2_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_table_v2.o
-	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_table_v2.o -L$(LIB_DIR) -lristretto $(LDFLAGS)
+$(BIN_DIR)/$(TEST_V2_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_table_v2.o | $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_table_v2.o $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
 
-$(BIN_DIR)/$(TEST_COMPREHENSIVE_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_comprehensive.o
-	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_comprehensive.o -L$(LIB_DIR) -lristretto $(LDFLAGS)
+$(BIN_DIR)/$(TEST_COMPREHENSIVE_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_comprehensive.o | $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_comprehensive.o $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
 
-$(BIN_DIR)/$(TEST_ORIGINAL_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_original_api.o
-	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_original_api.o -L$(LIB_DIR) -lristretto $(LDFLAGS)
+$(BIN_DIR)/$(TEST_ORIGINAL_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_original_api.o | $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_original_api.o $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
 
-$(BIN_DIR)/$(TEST_STRESS_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_stress.o
-	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_stress.o -L$(LIB_DIR) -lristretto $(LDFLAGS)
+$(BIN_DIR)/$(TEST_STRESS_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_stress.o | $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_stress.o $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
+
+$(BIN_DIR)/$(TEST_WHERE_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_where.o | $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_where.o $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
 
 run: $(BIN_DIR)/$(TARGET)
 	$(BIN_DIR)/$(TARGET)

@@ -18,7 +18,7 @@ typedef enum {
 
 typedef struct QueryPlan {
     PlanType type;
-    Table *table;
+    SqlTable *table;
     union {
         struct {
             Expr *filter;
@@ -26,7 +26,7 @@ typedef struct QueryPlan {
             uint32_t column_count;
         } scan;
         struct {
-            Value *values;
+            SqlValue *values;
             uint32_t value_count;
         } insert;
         struct {
@@ -57,6 +57,6 @@ void plan_destroy(QueryPlan *plan);
 
 RistrettoResult execute_plan(QueryContext *ctx);
 
-bool evaluate_expr(Expr *expr, Row *row, Table *table);
+bool evaluate_expr(Expr *expr, Row *row, SqlTable *table);
 
 #endif

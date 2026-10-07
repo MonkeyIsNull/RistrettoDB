@@ -26,8 +26,8 @@ static size_t align_offset(size_t offset) {
     return (offset + ALIGN_SIZE - 1) & ~(ALIGN_SIZE - 1);
 }
 
-Table* storage_table_create(const char* name) {
-    Table* table = malloc(sizeof(Table));
+SqlTable* storage_table_create(const char* name) {
+    SqlTable* table = malloc(sizeof(SqlTable));
     if (!table) {
         return NULL;
     }
@@ -46,7 +46,7 @@ Table* storage_table_create(const char* name) {
     return table;
 }
 
-void storage_table_destroy(Table* table) {
+void storage_table_destroy(SqlTable* table) {
     if (!table) {
         return;
     }
@@ -60,7 +60,7 @@ void storage_table_destroy(Table* table) {
     free(table);
 }
 
-void storage_table_add_column(Table* table, const char* name, DataType type) {
+void storage_table_add_column(SqlTable* table, const char* name, DataType type) {
     uint32_t new_count = table->column_count + 1;
     Column* new_columns = realloc(table->columns, new_count * sizeof(Column));
     if (!new_columns) {
@@ -81,7 +81,7 @@ void storage_table_add_column(Table* table, const char* name, DataType type) {
     table->column_count = new_count;
 }
 
-Row* storage_row_create(Table* table) {
+Row* storage_row_create(SqlTable* table) {
     Row* row = malloc(sizeof(Row));
     if (!row) {
         return NULL;
@@ -106,7 +106,7 @@ void storage_row_destroy(Row* row) {
     free(row);
 }
 
-void storage_row_set_value(Row* row, Table* table, uint32_t col_index, Value* value) {
+void storage_row_set_value(Row* row, SqlTable* table, uint32_t col_index, SqlValue* value) {
     // Defensive: validate all parameters
     if (!row || !table || !value || !row->data || !table->columns) {
         return;
@@ -148,13 +148,13 @@ void storage_row_set_value(Row* row, Table* table, uint32_t col_index, Value* va
     }
 }
 
-Value* storage_row_get_value(Row* row, Table* table, uint32_t col_index) {
+SqlValue* storage_row_get_value(Row* row, SqlTable* table, uint32_t col_index) {
     // Add comprehensive null checks
     if (!row || !table || !row->data || col_index >= table->column_count) {
         return NULL;
     }
     
-    Value* value = malloc(sizeof(Value));
+    SqlValue* value = malloc(sizeof(SqlValue));
     if (!value) {
         return NULL;
     }
@@ -226,7 +226,7 @@ Value* storage_row_get_value(Row* row, Table* table, uint32_t col_index) {
     return value;
 }
 
-void storage_value_destroy(Value* value) {
+void storage_value_destroy(SqlValue* value) {
     if (!value) {
         return;
     }
@@ -247,7 +247,7 @@ typedef struct {
 
 #define ROWS_PER_PAGE ((PAGE_SIZE - sizeof(PageHeader)) / sizeof(uint32_t))
 
-RowId table_insert_row(Table *table, Pager *pager, Row *row) {
+RowId table_insert_row(SqlTable *table, Pager *pager, Row *row) {
     // Simple implementation: always append to the last page
     if (table->root_page == 0) {
         table->root_page = pager_allocate_page(pager);
@@ -277,7 +277,7 @@ RowId table_insert_row(Table *table, Pager *pager, Row *row) {
     return row_id;
 }
 
-Row* table_get_row(Table *table, Pager *pager, RowId row_id) {
+Row* table_get_row(SqlTable *table, Pager *pager, RowId row_id) {
     void* page = pager_get_page(pager, row_id.page_id);
     if (!page) return NULL;
     
@@ -298,7 +298,7 @@ Row* table_get_row(Table *table, Pager *pager, RowId row_id) {
 }
 
 
-TableScanner* table_scanner_create(Table *table, Pager *pager) {
+TableScanner* table_scanner_create(SqlTable *table, Pager *pager) {
     TableScanner* scanner = malloc(sizeof(TableScanner));
     if (!scanner) return NULL;
     

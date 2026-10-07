@@ -138,8 +138,18 @@ void* pager_get_page(Pager* pager, uint32_t page_num) {
             size_t new_size = (page_num + 1) * PAGE_SIZE;
             mapped_file_resize(pager->file, new_size);
             pager->num_pages = page_num + 1;
+
+            // mapped_file_resize munmaps and re-mmaps, so file->data may now
+            // point at a different address. Every previously cached page
+            // pointer (pager->pages[*] = old file->data + offset) is now a
+            // dangling pointer into the unmapped region. Invalidate the whole
+            // cache so each page is recomputed against the new mapping. The
+            // cache holds read-through pointers only (writes land directly in
+            // the shared mmap, and pager_sync msyncs the whole mapping), so
+            // clearing it loses no data.
+            memset(pager->pages, 0, sizeof(pager->pages));
         }
-        
+
         size_t offset = page_num * PAGE_SIZE;
         pager->pages[page_num] = pager->file->data + offset;
         

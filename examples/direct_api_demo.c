@@ -5,7 +5,7 @@
 ** the compatibility layer that remaps function names.
 **
 ** To compile and run:
-**   make lib                    # Build the libraries first
+**   make libraries              # Build the libraries first
 **   gcc -O3 -I. -DRISTRETTO_NO_COMPATIBILITY_LAYER -o examples/direct_api_demo examples/direct_api_demo.c -Llib -lristretto
 **   ./examples/direct_api_demo
 */

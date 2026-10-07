@@ -5,7 +5,7 @@
 ** using external declarations to bypass the header confusion.
 **
 ** To compile and run:
-**   make lib                    # Build the libraries first
+**   make libraries              # Build the libraries first
 **   gcc -O3 -I. -o examples/raw_api_demo examples/raw_api_demo.c -Llib -lristretto
 **   ./examples/raw_api_demo
 */
