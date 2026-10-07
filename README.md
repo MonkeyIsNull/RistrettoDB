@@ -133,26 +133,36 @@ table.close();
 // See examples/nodejs/ for complete bindings and examples
 ```
 
-**Go Integration:**
+**Go Integration:** (cgo; see [`examples/go/`](examples/go/))
 ```go
-import "./ristretto"
+import "github.com/MonkeyIsNull/RistrettoDB/examples/go/ristretto"
 
-// Original SQL API (2.8x faster than SQLite)
+// Original SQL API (string-built SQL, no bound parameters)
 db, err := ristretto.Open("myapp.db")
 if err != nil { log.Fatal(err) }
 defer db.Close()
 
 err = db.Exec("CREATE TABLE users (id INTEGER, name TEXT)")
-results, err := db.Query("SELECT * FROM users")
+rows, err := db.Query("SELECT * FROM users")   // []map[string]string
 
-// Table V2 API (4.57x faster than SQLite)  
-table, err := ristretto.CreateTable("events", "CREATE TABLE events (id INTEGER)")
+// Table V2 API (fast append-only, mmap-backed; stored at data/events.rdb)
+table, err := ristretto.CreateTable("events",
+    "CREATE TABLE events (ts INTEGER, name TEXT(16), value REAL)")
 defer table.Close()
 
-values := []ristretto.Value{ristretto.IntegerValue(1)}
-err = table.AppendRow(values)
+err = table.AppendRow([]ristretto.Value{
+    ristretto.IntegerValue(1001),
+    ristretto.TextValue("login"),
+    ristretto.RealValue(1.5),
+})
 
-// See examples/go/ for complete bindings and examples
+// Read rows back (WHERE is not yet implemented in C, so Scan returns all rows)
+all, err := table.Scan()
+for _, r := range all {
+    fmt.Println(r.Get("ts").Int(), r.Get("name").Text(), r.Get("value").Float())
+}
+
+// See examples/go/ for complete, buildable bindings, tests, and a demo.
 ```
 
 ### Real-World Examples
@@ -172,7 +182,7 @@ Our [examples/](examples/) directory contains working demonstrations:
 
 **Run the examples:**
 ```bash
-make lib                    # Build libraries first
+make static                 # Build lib/libristretto.a first (libraries: both .a and .so)
 
 # C/C++ Examples
 make examples              # Build all C examples
@@ -180,8 +190,8 @@ make examples              # Build all C examples
 
 # Language Binding Examples
 cd examples/python && python3 example.py     # Python demo
-cd examples/nodejs && npm install && node example.js  # Node.js demo  
-cd examples/go && go run example.go          # Go demo (requires CGO setup)
+cd examples/nodejs && npm install && node example.js  # Node.js demo
+cd examples/go && go test ./ristretto && go run ./cmd/example   # Go tests + demo (cgo)
 ```
 
 ### Production Deployment
