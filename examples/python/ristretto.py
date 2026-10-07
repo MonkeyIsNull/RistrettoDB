@@ -1,34 +1,31 @@
 """
-RistrettoDB Python Bindings
+RistrettoDB Python Bindings (Table V2)
 
-A tiny, blazingly fast, embeddable SQL engine with Python bindings.
-Provides both Original SQL API (2.8x faster than SQLite) and 
-Ultra-Fast Table V2 API (4.57x faster than SQLite).
+RistrettoDB is a fast, embeddable, fixed-schema, append-only, single-writer
+telemetry/analytics store written in C. It is NOT a general-purpose SQL
+database: there is no JOIN, UPDATE, DELETE, or transactions, and exactly one
+writer at a time.
 
 Usage:
-    from ristretto import RistrettoDB, RistrettoTable, RistrettoValue
-    
-    # Original SQL API
-    db = RistrettoDB("mydb.db")
-    db.exec("CREATE TABLE test (id INTEGER, name TEXT)")
-    db.exec("INSERT INTO test VALUES (1, 'Hello')")
-    results = db.query("SELECT * FROM test")
-    db.close()
-    
-    # Ultra-Fast Table V2 API
-    table = RistrettoTable.create("events", 
+    from ristretto import RistrettoTable, RistrettoValue, version
+
+    table = RistrettoTable.create("events",
         "CREATE TABLE events (timestamp INTEGER, event TEXT(32))")
-    table.append_row([RistrettoValue.integer(1672531200), 
+    table.append_row([RistrettoValue.integer(1672531200),
                       RistrettoValue.text("user_login")])
+    for row in table.scan():
+        print(row)
     table.close()
+
+Build the shared library first (from the repo root):
+    make dynamic    # lib/libristretto.so (Linux) / lib/libristretto.dylib (macOS)
 """
 
 import ctypes
 import os
-import sys
-from typing import List, Optional, Callable, Any, Union
+from typing import Any, Callable, List, Optional
 from enum import IntEnum
-from dataclasses import dataclass
+
 
 # Determine library path
 def _find_library():
@@ -45,7 +42,7 @@ def _find_library():
     candidates = []
     for n in names:
         candidates.append(os.path.join(repo_lib, n))   # <repo>/lib/<name>
-        candidates.append(os.path.join(here, n))       # alongside this file
+        candidates.append(os.path.join(here, n))        # alongside this file
     candidates += [
         "/usr/local/lib/libristretto.so",
         "/usr/local/lib/libristretto.dylib",
@@ -62,9 +59,11 @@ def _find_library():
         "  (produces lib/libristretto.so on Linux, lib/libristretto.dylib on macOS)"
     )
 
+
 # Load the library
 _lib_path = _find_library()
 _lib = ctypes.CDLL(_lib_path)
+
 
 class RistrettoResult(IntEnum):
     """Return codes from RistrettoDB functions"""
@@ -76,6 +75,7 @@ class RistrettoResult(IntEnum):
     NOT_FOUND = -5
     CONSTRAINT_ERROR = -6
 
+
 class RistrettoColumnType(IntEnum):
     """Column data types for Table V2 API"""
     INTEGER = 1
@@ -83,9 +83,11 @@ class RistrettoColumnType(IntEnum):
     TEXT = 3
     NULLABLE = 4
 
+
 class RistrettoException(Exception):
     """Base exception for RistrettoDB errors"""
     pass
+
 
 class RistrettoError(RistrettoException):
     """Database operation error"""
@@ -93,23 +95,23 @@ class RistrettoError(RistrettoException):
         self.result_code = result_code
         super().__init__(f"RistrettoDB Error ({result_code.name}): {message}")
 
-# Function signatures
+
+# ---- Version ---------------------------------------------------------------
 _lib.ristretto_version.restype = ctypes.c_char_p
 _lib.ristretto_version_number.restype = ctypes.c_int
 
-_lib.ristretto_open.argtypes = [ctypes.c_char_p]
-_lib.ristretto_open.restype = ctypes.c_void_p
 
-_lib.ristretto_close.argtypes = [ctypes.c_void_p]
-_lib.ristretto_close.restype = None
+def version() -> str:
+    """Return the RistrettoDB version string, e.g. '0.3.0'."""
+    return _lib.ristretto_version().decode("utf-8")
 
-_lib.ristretto_exec.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-_lib.ristretto_exec.restype = ctypes.c_int
 
-_lib.ristretto_error_string.argtypes = [ctypes.c_int]
-_lib.ristretto_error_string.restype = ctypes.c_char_p
+def version_number() -> int:
+    """Return the packed numeric version."""
+    return _lib.ristretto_version_number()
 
-# Table V2 API signatures
+
+# ---- Table V2 API signatures -----------------------------------------------
 _lib.ristretto_table_create.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
 _lib.ristretto_table_create.restype = ctypes.c_void_p
 
@@ -129,15 +131,18 @@ _lib.ristretto_table_get_row_count.restype = ctypes.c_size_t
 class _CText(ctypes.Structure):
     _fields_ = [("data", ctypes.c_char_p), ("length", ctypes.c_size_t)]
 
+
 class _CValueUnion(ctypes.Union):
     _fields_ = [("integer", ctypes.c_int64),
                 ("real", ctypes.c_double),
                 ("text", _CText)]
 
+
 class _CValue(ctypes.Structure):
     _fields_ = [("type", ctypes.c_int),
                 ("value", _CValueUnion),
                 ("is_null", ctypes.c_bool)]
+
 
 assert ctypes.sizeof(_CValue) == 32, \
     f"RistrettoValue ABI mismatch: expected 32 bytes, got {ctypes.sizeof(_CValue)}"
@@ -170,187 +175,123 @@ _lib.ristretto_table_create_ex.restype = ctypes.c_void_p
 _lib.ristretto_table_open_ex.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
 _lib.ristretto_table_open_ex.restype = ctypes.c_void_p
 
-_QUERY_CB_TYPE = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_int,
-                                  ctypes.POINTER(ctypes.c_char_p),
-                                  ctypes.POINTER(ctypes.c_char_p))
-_lib.ristretto_query.argtypes = [
-    ctypes.c_void_p, ctypes.c_char_p, _QUERY_CB_TYPE, ctypes.c_void_p]
-_lib.ristretto_query.restype = ctypes.c_int
+# V2 scan callback: fired once per row with a pointer to an array of
+# column_count RistrettoValue structs (valid only for the duration of the
+# call). The C V2 API has no WHERE clause; it scans every row.
+_SELECT_CB_TYPE = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(_CValue))
+_lib.ristretto_table_select.argtypes = [
+    ctypes.c_void_p, _SELECT_CB_TYPE, ctypes.c_void_p]
+_lib.ristretto_table_select.restype = ctypes.c_bool
+
+
+def _count_schema_columns(schema_sql: str) -> int:
+    """Count columns in a `CREATE TABLE name (...)` schema by counting the
+    top-level commas between the outermost parentheses. The C scan callback
+    hands back a bare pointer with no count, so select() needs to know how many
+    RistrettoValue structs to decode per row.
+    """
+    open_idx = schema_sql.find("(")
+    if open_idx < 0:
+        return 0
+    depth = 0
+    cols = 1
+    for ch in schema_sql[open_idx:]:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                break
+        elif ch == "," and depth == 1:
+            cols += 1
+    return cols
+
 
 # Value structure
 class RistrettoValue:
-    """Represents a value in RistrettoDB Table V2 API"""
-    
+    """Represents a value in the RistrettoDB Table V2 API."""
+
     def __init__(self, type_: RistrettoColumnType, value: Any, is_null: bool = False):
         self.type = type_
         self.value = value
         self.is_null = is_null
-    
+
     @classmethod
     def integer(cls, value: int) -> 'RistrettoValue':
         """Create an integer value"""
         return cls(RistrettoColumnType.INTEGER, value)
-    
+
     @classmethod
     def real(cls, value: float) -> 'RistrettoValue':
         """Create a real (float) value"""
         return cls(RistrettoColumnType.REAL, value)
-    
+
     @classmethod
     def text(cls, value: str) -> 'RistrettoValue':
         """Create a text value"""
         return cls(RistrettoColumnType.TEXT, value)
-    
+
     @classmethod
     def null(cls) -> 'RistrettoValue':
-        """Create a null value"""
+        """Create a NULL value (persists and round-trips as NULL)."""
         return cls(RistrettoColumnType.NULLABLE, None, True)
-    
+
     def __repr__(self):
         if self.is_null:
             return "RistrettoValue(NULL)"
         return f"RistrettoValue({self.type.name}, {self.value!r})"
 
-class RistrettoDB:
-    """
-    RistrettoDB Original SQL API
-    
-    Provides 2.8x faster performance than SQLite for general SQL operations.
-    Supports CREATE TABLE, INSERT, SELECT with WHERE clauses.
-    """
-    
-    def __init__(self, filename: str):
-        """Open or create a RistrettoDB database"""
-        self.filename = filename
-        self._handle = _lib.ristretto_open(filename.encode('utf-8'))
-        if not self._handle:
-            raise RistrettoError(RistrettoResult.ERROR, f"Failed to open database: {filename}")
-    
-    def close(self):
-        """Close the database"""
-        if self._handle:
-            _lib.ristretto_close(self._handle)
-            self._handle = None
-    
-    def __enter__(self):
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-    
-    def exec(self, sql: str) -> None:
-        """Execute a SQL statement (DDL/DML)"""
-        if not self._handle:
-            raise RistrettoError(RistrettoResult.ERROR, "Database is closed")
-        
-        result = _lib.ristretto_exec(self._handle, sql.encode('utf-8'))
-        if result != RistrettoResult.OK:
-            error_msg = _lib.ristretto_error_string(result).decode('utf-8')
-            raise RistrettoError(RistrettoResult(result), error_msg)
-    
-    def query(self, sql: str, callback: Optional[Callable] = None) -> List[dict]:
-        """
-        Execute a SQL query and return results
-        
-        If callback is provided, it will be called for each row.
-        Otherwise, returns a list of dictionaries.
-        """
-        if not self._handle:
-            raise RistrettoError(RistrettoResult.ERROR, "Database is closed")
-        
-        results = []
-        
-        def internal_callback(ctx, n_cols, values_ptr, col_names_ptr):
-            # Convert C arrays to Python
-            values = []
-            col_names = []
-            
-            for i in range(n_cols):
-                # Get column name
-                col_name_ptr = ctypes.cast(col_names_ptr, ctypes.POINTER(ctypes.c_char_p))[i]
-                col_name = col_name_ptr.decode('utf-8') if col_name_ptr else f"col_{i}"
-                col_names.append(col_name)
-                
-                # Get value
-                value_ptr = ctypes.cast(values_ptr, ctypes.POINTER(ctypes.c_char_p))[i]
-                value = value_ptr.decode('utf-8') if value_ptr else None
-                values.append(value)
-            
-            row = dict(zip(col_names, values))
-            
-            if callback:
-                callback(row)
-            else:
-                results.append(row)
-        
-        # Convert Python callback to C callback
-        c_callback = _QUERY_CB_TYPE(internal_callback)
-        
-        # Execute query
-        result = _lib.ristretto_query(self._handle, sql.encode('utf-8'), c_callback, None)
-        if result != RistrettoResult.OK:
-            error_msg = _lib.ristretto_error_string(result).decode('utf-8')
-            raise RistrettoError(RistrettoResult(result), error_msg)
-        
-        return results
-    
-    @staticmethod
-    def version() -> str:
-        """Get RistrettoDB version string"""
-        return _lib.ristretto_version().decode('utf-8')
-    
-    @staticmethod
-    def version_number() -> int:
-        """Get RistrettoDB version number"""
-        return _lib.ristretto_version_number()
 
 class RistrettoTable:
     """
-    RistrettoDB Table V2 Ultra-Fast API
-    
-    Provides 4.57x faster performance than SQLite for append-only workloads.
-    Optimized for high-speed logging, telemetry, and analytics ingestion.
+    RistrettoDB Table V2 API.
+
+    A fixed-schema, append-only, mmap-backed table store optimised for
+    high-speed logging, telemetry, and analytics ingestion.
     """
-    
-    def __init__(self, handle: ctypes.c_void_p, name: str):
-        """Initialize with existing handle (use create() or open() class methods)"""
+
+    def __init__(self, handle: ctypes.c_void_p, name: str, column_count: int = 0):
+        """Initialize with an existing handle (use create()/open())."""
         self._handle = handle
         self.name = name
-    
+        # 0 when unknown (e.g. opened without a schema); needed by scan().
+        self.column_count = column_count
+
     @classmethod
     def create(cls, name: str, schema_sql: str) -> 'RistrettoTable':
-        """Create a new ultra-fast table"""
+        """Create a new table (truncating any existing file)."""
         handle = _lib.ristretto_table_create(name.encode('utf-8'), schema_sql.encode('utf-8'))
         if not handle:
             raise RistrettoError(RistrettoResult.ERROR, f"Failed to create table: {name}")
-        return cls(handle, name)
-    
+        return cls(handle, name, _count_schema_columns(schema_sql))
+
     @classmethod
-    def open(cls, name: str) -> 'RistrettoTable':
-        """Open an existing ultra-fast table"""
+    def open(cls, name: str, column_count: int = 0) -> 'RistrettoTable':
+        """Open an existing table, resuming its rows. Pass column_count so
+        scan() knows how many values to decode per row."""
         handle = _lib.ristretto_table_open(name.encode('utf-8'))
         if not handle:
             raise RistrettoError(RistrettoResult.ERROR, f"Failed to open table: {name}")
-        return cls(handle, name)
-    
+        return cls(handle, name, column_count)
+
     def close(self):
         """Close the table"""
         if self._handle:
             _lib.ristretto_table_close(self._handle)
             self._handle = None
-    
+
     def __enter__(self):
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
-    
+
     def get_row_count(self) -> int:
         """Get the number of rows in the table"""
         if not self._handle:
             raise RistrettoError(RistrettoResult.ERROR, "Table is closed")
         return _lib.ristretto_table_get_row_count(self._handle)
-    
+
     def append_row(self, values: List[RistrettoValue]) -> bool:
         """
         Append one row to the table.
@@ -389,80 +330,82 @@ class RistrettoTable:
                                  f"append_row failed for table '{self.name}'")
         return True
 
+    def select(self, callback: Optional[Callable[[List[Any]], None]] = None,
+               column_count: Optional[int] = None) -> List[List[Any]]:
+        """
+        Scan every row (V2 has no WHERE clause; filter in Python), invoking
+        callback(values) once per row with one decoded Python value per column
+        (int / float / str / None). A NULL decodes to None, keyed off the C
+        is_null flag. Returns the list of per-row value lists.
+        """
+        if not self._handle:
+            raise RistrettoError(RistrettoResult.ERROR, "Table is closed")
+        ncols = column_count if column_count is not None else self.column_count
+        if not ncols or ncols < 1:
+            raise RistrettoError(
+                RistrettoResult.ERROR,
+                f"column_count for table '{self.name}' is unknown; pass it to select()")
+
+        rows: List[List[Any]] = []
+
+        def _cb(ctx, row_ptr):
+            values: List[Any] = []
+            for i in range(ncols):
+                cv = row_ptr[i]
+                if cv.is_null or cv.type == RistrettoColumnType.NULLABLE:
+                    values.append(None)
+                elif cv.type == RistrettoColumnType.INTEGER:
+                    values.append(int(cv.value.integer))
+                elif cv.type == RistrettoColumnType.REAL:
+                    values.append(float(cv.value.real))
+                elif cv.type == RistrettoColumnType.TEXT:
+                    data = cv.value.text.data
+                    values.append(data.decode('utf-8') if data is not None else "")
+                else:
+                    values.append(None)
+            if callback:
+                callback(values)
+            else:
+                rows.append(values)
+
+        c_cb = _SELECT_CB_TYPE(_cb)
+        ok = _lib.ristretto_table_select(self._handle, c_cb, None)
+        if not ok:
+            raise RistrettoError(RistrettoResult.ERROR,
+                                 f"select failed for table '{self.name}'")
+        return rows
+
+    # scan() is an alias for select() that always collects and returns rows.
+    def scan(self, column_count: Optional[int] = None) -> List[List[Any]]:
+        return self.select(callback=None, column_count=column_count)
+
+
 def demo():
-    """Demonstration of RistrettoDB Python bindings"""
-    print("RistrettoDB Python Bindings Demo")
-    print("=" * 40)
-    print(f"Library Version: {RistrettoDB.version()}")
+    """Demonstration of the RistrettoDB Python bindings (Table V2)."""
+    print("RistrettoDB Python Bindings Demo (Table V2)")
+    print("=" * 44)
+    print(f"Library Version: {version()}")
     print(f"Library Path: {_lib_path}")
     print()
-    
-    # Demo Original SQL API
-    print("1. Original SQL API Demo (2.8x faster than SQLite)")
-    print("-" * 50)
-    
-    try:
-        with RistrettoDB("python_demo.db") as db:
-            print("SUCCESS: Database opened successfully")
-            
-            # Create table
-            db.exec("CREATE TABLE inventory (id INTEGER, item TEXT, price REAL)")
-            print("SUCCESS: Table created")
-            
-            # Insert data
-            items = [
-                "INSERT INTO inventory VALUES (1, 'Laptop', 999.99)",
-                "INSERT INTO inventory VALUES (2, 'Mouse', 29.99)",
-                "INSERT INTO inventory VALUES (3, 'Keyboard', 79.99)"
-            ]
-            
-            for sql in items:
-                db.exec(sql)
-            print("SUCCESS: Data inserted")
-            
-            # Query data
-            results = db.query("SELECT * FROM inventory")
-            print(f"SUCCESS: Query executed, found {len(results)} rows:")
-            for row in results:
-                print(f"   {row}")
-        
-        print("SUCCESS: Original SQL API demo completed\n")
-        
-    except RistrettoError as e:
-        print(f"ERROR: SQL API Error: {e}")
-    
-    # Demo Table V2 API
-    print("2. Table V2 Ultra-Fast API Demo (4.57x faster than SQLite)")
-    print("-" * 60)
-    
-    try:
-        with RistrettoTable.create("python_v2_demo", 
-                                 "CREATE TABLE python_v2_demo (id INTEGER, name TEXT(32), value REAL)") as table:
-            print("SUCCESS: Ultra-fast table created")
-            
-            # Insert high-speed data
-            values = [
-                RistrettoValue.integer(1),
-                RistrettoValue.text("test_record"),
-                RistrettoValue.real(123.45)
-            ]
-            
-            success = table.append_row(values)
-            if success:
-                print("SUCCESS: High-speed row insertion completed")
-                print(f"   Total rows: {table.get_row_count()}")
-        
-        print("SUCCESS: Table V2 ultra-fast demo completed")
-        
-    except RistrettoError as e:
-        print(f"ERROR: Table V2 API Error: {e}")
-    
+
+    with RistrettoTable.create(
+            "python_v2_demo",
+            "CREATE TABLE python_v2_demo (id INTEGER, name TEXT(32), value REAL)") as table:
+        print("SUCCESS: table created")
+        table.append_row([RistrettoValue.integer(1),
+                          RistrettoValue.text("test_record"),
+                          RistrettoValue.real(123.45)])
+        # A row with a NULL text field to show NULL round-trips.
+        table.append_row([RistrettoValue.integer(2),
+                          RistrettoValue.null(),
+                          RistrettoValue.real(0.0)])
+        print(f"   Total rows: {table.get_row_count()}")
+        print("   Scan:")
+        for row in table.scan():
+            print(f"     {row}")
+
     print("\nSUCCESS: Python bindings demo completed!")
-    print("\nIntegration Examples:")
-    print("  • IoT sensor data logging")
-    print("  • High-frequency trading data")
-    print("  • Real-time analytics ingestion")
-    print("  • Security audit trails")
+
 
 if __name__ == "__main__":
     demo()

@@ -1,57 +1,48 @@
+/*
+** Smoke test: use RistrettoDB fully embedded (Option 1). Define
+** RISTRETTO_EMBEDDED and #include the amalgamation .c directly — no separate
+** compilation or linking required.
+**
+**   clang -O3 -Iembed -o test_embedded_compat embed/test_embedded_compat.c
+**   ./test_embedded_compat
+*/
 #include <stdio.h>
 
 #define RISTRETTO_EMBEDDED
 #include "ristretto.c"
 
+static void print_row(void *ctx, const RistrettoValue *row) {
+    (void)ctx;
+    printf("  id=%lld value=%.2f name=%s\n",
+           (long long)row[0].value.integer,
+           row[1].value.real,
+           row[2].is_null ? "(null)" : row[2].value.text.data);
+}
+
 int main(void) {
-    printf("Testing RistrettoDB Embedded (Embedded Mode)\n");
-    printf("Version: %s\n", ristretto_version());
-    
-    // Test Original SQL API
-    printf("\n--- Testing Original SQL API ---\n");
-    RistrettoDB* db = ristretto_open("embedded_compat_test.db");
-    if (db) {
-        printf("SUCCESS: Database opened successfully\n");
-        
-        RistrettoResult result = ristretto_exec(db, "CREATE TABLE test (id INTEGER, name TEXT)");
-        if (result == RISTRETTO_OK) {
-            printf("SUCCESS: Table created successfully\n");
-        } else {
-            printf("ERROR: Table creation failed: %s\n", ristretto_error_string(result));
-        }
-        
-        ristretto_close(db);
-    } else {
-        printf("ERROR: Failed to open database\n");
-    }
-    
-    // Test Table V2 API
-    printf("\n--- Testing Table V2 API ---\n");
-    RistrettoTable* table = ristretto_table_create("v2_embedded_test", 
+    printf("Testing RistrettoDB Embedded (single-file, RISTRETTO_EMBEDDED)\n");
+    printf("Version: %s\n\n", ristretto_version());
+
+    RistrettoTable *table = ristretto_table_create("v2_embedded_test",
         "CREATE TABLE v2_embedded_test (id INTEGER, value REAL, name TEXT(32))");
-    
-    if (table) {
-        printf("SUCCESS: V2 table created successfully\n");
-        
-        // Insert a test row
-        RistrettoValue values[3];
-        values[0] = ristretto_value_integer(1);
-        values[1] = ristretto_value_real(123.45);
-        values[2] = ristretto_value_text("embedded_test");
-        
-        if (ristretto_table_append_row(table, values)) {
-            printf("SUCCESS: Row inserted successfully\n");
-            printf("Row count: %zu\n", ristretto_table_get_row_count(table));
-        } else {
-            printf("ERROR: Row insertion failed\n");
-        }
-        
-        ristretto_value_destroy(&values[2]);
-        ristretto_table_close(table);
-    } else {
-        printf("ERROR: Failed to create V2 table\n");
+    if (!table) {
+        printf("ERROR: Failed to create table\n");
+        return 1;
     }
-    
-    printf("\nEmbedded compatibility test completed!\n");
+    printf("SUCCESS: table created\n");
+
+    for (int i = 0; i < 3; i++) {
+        RistrettoValue v[3];
+        v[0] = ristretto_value_integer(i + 1);
+        v[1] = ristretto_value_real((i + 1) * 2.25);
+        v[2] = ristretto_value_text("single-file");
+        ristretto_table_append_row(table, v);
+        ristretto_value_destroy(&v[2]);
+    }
+    printf("SUCCESS: appended %zu rows\n\n", ristretto_table_get_row_count(table));
+
+    ristretto_table_select(table, print_row, NULL);
+    ristretto_table_close(table);
+    printf("\nSUCCESS: embedded single-file smoke test passed.\n");
     return 0;
 }

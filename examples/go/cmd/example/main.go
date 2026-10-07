@@ -1,7 +1,7 @@
 // Command example is a small, self-contained demo of the RistrettoDB Go
-// bindings: it opens a database, uses both the Original SQL API and the
-// Table V2 ultra-fast API, appends rows (including TEXT and NULL), reads them
-// back, and demonstrates that V2 data survives a close/reopen cycle.
+// bindings: it creates a Table V2 table, appends rows (including TEXT and
+// NULL), reads them back, and demonstrates that the data survives a
+// close/reopen cycle.
 //
 // Run it from the examples/go module directory after building the C library:
 //
@@ -20,41 +20,7 @@ func main() {
 	fmt.Printf("RistrettoDB v%s (version number %d)\n\n",
 		ristretto.Version(), ristretto.VersionNumber())
 
-	sqlDemo()
 	v2Demo()
-}
-
-func sqlDemo() {
-	fmt.Println("== Original SQL API ==")
-	db, err := ristretto.Open("example_sql.db")
-	if err != nil {
-		log.Fatalf("open: %v", err)
-	}
-	defer db.Close()
-
-	if err := db.Exec("CREATE TABLE users (id INTEGER, name TEXT)"); err != nil {
-		log.Fatalf("create: %v", err)
-	}
-	// NOTE: the C SQL parser does not support escaped quotes, so TEXT literals
-	// cannot contain a single quote. QuoteString still guards the common case.
-	for _, u := range []struct {
-		id   int
-		name string
-	}{{1, "Alice"}, {2, "Bob"}, {3, "Carol"}} {
-		sql := fmt.Sprintf("INSERT INTO users VALUES (%d, %s)", u.id, ristretto.QuoteString(u.name))
-		if err := db.Exec(sql); err != nil {
-			log.Fatalf("insert: %v", err)
-		}
-	}
-
-	rows, err := db.Query("SELECT * FROM users")
-	if err != nil {
-		log.Fatalf("query: %v", err)
-	}
-	for _, r := range rows {
-		fmt.Printf("  id=%s name=%s\n", r["id"], r["name"])
-	}
-	fmt.Println()
 }
 
 func v2Demo() {
@@ -92,7 +58,12 @@ func v2Demo() {
 		log.Fatalf("scan: %v", err)
 	}
 	for _, row := range scanned {
-		fmt.Printf("    ts=%d name=%q value=%v\n",
-			row.Get("ts").Int(), row.Get("name").Text(), row.Get("value").Float())
+		name := row.Get("name")
+		nameStr := fmt.Sprintf("%q", name.Text())
+		if name.IsNull {
+			nameStr = "NULL"
+		}
+		fmt.Printf("    ts=%d name=%s value=%v\n",
+			row.Get("ts").Int(), nameStr, row.Get("value").Float())
 	}
 }

@@ -1,247 +1,61 @@
-# RistrettoDB Benchmarking Suite
+# RistrettoDB Benchmark
 
-This directory contains a comprehensive benchmarking suite to compare RistrettoDB against SQLite and analyze RistrettoDB's performance characteristics.
+This directory contains the RistrettoDB write-throughput benchmark.
 
-## Available Benchmarks
+RistrettoDB is an append-only store with no SQL engine, so there is no
+general-purpose database to compare against. The benchmark measures what the
+engine actually does — appending fixed-width rows — and reports the result with
+a pinned, reproducible configuration.
 
-### 1. `benchmark.c` - Head-to-Head Comparison
-Directly compares RistrettoDB against SQLite on equivalent operations:
-- Sequential INSERTs
-- Random INSERTs  
-- Full table scans
-- SELECT with WHERE clauses
+## The benchmark: `ultra_fast_benchmark.c`
 
-**Features:**
-- Uses SQLite's in-memory mode for fair comparison
-- Disables SQLite journaling and synchronous writes
-- Measures wall-clock time with high precision
-- Calculates speedup ratios
+Appends rows to a Table V2 table and reports throughput (rows/sec) and latency
+(ns/row), plus a `malloc` baseline for context.
 
-### 2. `microbench.c` - Detailed Performance Analysis
-Analyzes RistrettoDB's performance characteristics in detail:
-- CPU time (user/system) measurement
-- Memory usage tracking (RSS)
-- Operations per second calculation
-- Isolated operation testing
+### Pinned configuration
 
-**Metrics Tracked:**
-- Wall clock time
-- User CPU time
-- System CPU time
-- Peak resident set size (memory)
-- Throughput (operations/second)
+The throughput number is flag- and machine-sensitive, so it is only meaningful
+alongside the configuration it was produced with:
 
-### 3. `speedtest_subset.c` - SQLite SpeedTest1 Adaptation
-Based on SQLite's official `speedtest1.c` benchmark, adapted for RistrettoDB's feature set:
-- Multiple INSERT patterns (sequential, indexed, random)
-- Various SELECT patterns
-- Industry-standard test methodology
+| Parameter      | Value                                                      |
+| -------------- | ---------------------------------------------------------- |
+| Compiler flags | `-O3 -std=c11` (portable baseline, **no** `-march=native`) |
+| Rows           | 1,000,000 (`BENCHMARK_ROWS`)                               |
+| Schema         | `(id INTEGER, data TEXT(16))`                              |
+| Machine class  | modern arm64 / x86-64 laptop or server, warm page cache    |
 
-## Building and Running
+Always quote this configuration with any number you report. (Host-tuned builds
+with `SIMD=native` and different machines will produce different figures.)
 
-### Prerequisites
+## Running
+
 ```bash
-# Install SQLite development headers
-# macOS:
-brew install sqlite3
+# From the repo root:
+make benchmark
 
-# Ubuntu/Debian:
-sudo apt-get install libsqlite3-dev
-
-# RHEL/CentOS:
-sudo yum install sqlite-devel
+# Or directly:
+make -C benchmark run-ultra-fast
 ```
 
-### Build All Benchmarks
+## Optional SQLite contrast (off by default)
+
+An optional contrast against SQLite's in-memory `INSERT` path is available
+behind a compile flag. It is **off by default** and never required by CI
+(sqlite3 is not a build dependency):
+
 ```bash
-cd benchmark
-make
+# Requires sqlite3 development headers:
+#   macOS:        brew install sqlite3
+#   Debian/Ubuntu: sudo apt-get install libsqlite3-dev
+make -C benchmark run-ultra-fast WITH_SQLITE=1
 ```
 
-### Run Complete Benchmark Suite
-```bash
-make run-all
-```
+This is a contrast between two *different* workloads (RistrettoDB's append path
+vs. SQLite's in-memory row inserts), not an apples-to-apples speedup claim.
+RistrettoDB does not implement SQL.
 
-### Run Individual Benchmarks
-```bash
-# Head-to-head comparison
-make run-benchmark
+## Portability note
 
-# Detailed performance analysis
-make run-microbench
-
-# SpeedTest1 subset
-make run-speedtest
-```
-
-## Performance Analysis Tools
-
-### CPU Profiling (macOS)
-```bash
-make profile-benchmark
-```
-Uses Instruments to create detailed CPU usage profiles.
-
-### Cache Analysis (Linux/macOS)
-```bash
-make cachegrind-benchmark
-```
-Uses Valgrind's Cachegrind to analyze cache hit/miss patterns.
-
-### Memory Analysis
-```bash
-make memory-benchmark
-```
-Uses Valgrind to detect memory leaks and analyze allocation patterns.
-
-## Understanding Results
-
-### Benchmark Output Format
-```
-Test Name                  | SQLite Time | Ristretto Time | Speedup
----------------------------|-------------|----------------|--------
-Sequential INSERT          |    1.23s    |     0.45s     |  2.73x
-```
-
-### Key Metrics
-
-**Speedup Ratio:**
-- `> 1.0x`: RistrettoDB is faster
-- `< 1.0x`: SQLite is faster
-- `~1.0x`: Roughly equivalent performance
-
-**Operations/Second:**
-- Higher is better
-- Compare similar operations across databases
-- Consider feature parity when interpreting
-
-### Expected Performance Characteristics
-
-**RistrettoDB Advantages:**
-- Sequential INSERTs (no journaling overhead)
-- Full table scans (memory-mapped access)
-- Simple queries (no query planner overhead)
-- Memory efficiency (fixed-width rows)
-
-**SQLite Advantages:**
-- Complex queries (mature optimizer)
-- Concurrent access (better locking)
-- Feature completeness (transactions, etc.)
-- Random access patterns (B+tree maturity)
-
-## Interpreting Results
-
-### Factors Affecting Performance
-
-**Hardware Dependencies:**
-- CPU architecture (SIMD instruction availability)
-- Memory bandwidth (mmap performance)
-- Storage type (SSD vs HDD for disk-based tests)
-- Cache sizes (L1/L2/L3 impact)
-
-**Compiler Optimizations:**
-- `-march=native` enables CPU-specific optimizations
-- `-O3` provides aggressive optimization
-- Profile-guided optimization (PGO) could improve results further
-
-**Operating System:**
-- Page cache behavior
-- Memory allocator efficiency
-- System call overhead
-
-### Benchmark Limitations
-
-**RistrettoDB Limitations:**
-- No UPDATE/DELETE support (affects some comparisons)
-- No complex WHERE clauses yet
-- No JOIN operations
-- No transactions
-
-**Fair Comparison Notes:**
-- SQLite configured with minimal safety (no journaling)
-- In-memory mode used to minimize I/O differences
-- Both use default settings unless noted
-
-## Adding Custom Benchmarks
-
-### Example Custom Benchmark
-```c
-static void my_custom_test(RistrettoDB *db, int iterations) {
-    // Your custom test here
-    for (int i = 0; i < iterations; i++) {
-        // Test operations
-    }
-}
-
-// Add to benchmark array:
-{"My Test", my_sqlite_version, my_custom_test, 1000}
-```
-
-### Benchmark Best Practices
-
-1. **Warm-up runs**: Run small tests first to warm caches
-2. **Multiple iterations**: Average results across multiple runs
-3. **Statistical significance**: Consider variance in results
-4. **Isolation**: Run benchmarks on idle systems
-5. **Documentation**: Note any configuration changes
-
-## Continuous Performance Monitoring
-
-### Automated Benchmarking
-```bash
-#!/bin/bash
-# Example CI/CD performance monitoring
-cd benchmark
-make clean
-make benchmarks
-
-# Run benchmarks and save results
-make run-all > results_$(date +%Y%m%d).txt
-
-# Alert on performance regressions
-# (implement comparison logic)
-```
-
-### Performance Regression Detection
-- Compare results across commits
-- Set acceptable performance thresholds  
-- Alert on significant slowdowns
-- Track performance trends over time
-
-## Troubleshooting
-
-### Common Issues
-
-**Build Errors:**
-```bash
-# Missing SQLite headers
-sudo apt-get install libsqlite3-dev
-
-# Clang not found
-export CC=gcc  # Use GCC instead
-```
-
-**Runtime Errors:**
-```bash
-# Permission denied on file creation
-chmod +w /tmp  # Or run in writable directory
-
-# Segmentation faults
-gdb ./bin/benchmark  # Debug with GDB
-```
-
-**Unexpected Results:**
-- Check system load (`top`, `htop`)
-- Verify compiler flags match between builds
-- Run multiple times and average results
-- Check for background processes affecting performance
-
-## Contributing
-
-When adding new benchmarks:
-1. Follow existing naming conventions
-2. Document what the benchmark measures
-3. Include both SQLite and RistrettoDB implementations
-4. Add appropriate error handling
-5. Update this README with new benchmark descriptions
+The benchmark Makefile uses the portable baseline by default (no
+`-march=native`, which would produce binaries that `SIGILL` on a different
+microarchitecture). Opt into host tuning with `make SIMD=native`.

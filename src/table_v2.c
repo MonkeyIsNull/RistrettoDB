@@ -95,11 +95,12 @@ bool table_parse_schema(const char *schema_sql, ColumnDesc *columns,
     const char *end = strrchr(schema_sql, ')');
     if (!end) return false;
     
-    // Parse column definitions
+    // Parse column definitions. Every row starts with a NULL_BITMAP_BYTES-wide
+    // NULL bitmap, so column data begins after it.
     char col_def[256];
     const char *current = start;
-    uint32_t offset = 0;
-    
+    uint32_t offset = NULL_BITMAP_BYTES;
+
     while (current < end && *column_count < MAX_COLUMNS) {
         // Extract column definition
         const char *comma = strchr(current, ',');
@@ -403,27 +404,32 @@ bool table_remap(Table *table) {
 
 // Row packing
 bool table_pack_row(Table *table, const Value *values, uint8_t *row_buffer) {
+    // Zeroing the whole row also clears the leading NULL bitmap.
     memset(row_buffer, 0, table->header->row_size);
-    
+
     for (uint32_t i = 0; i < table->header->column_count; i++) {
         const ColumnDesc *col = &table->header->columns[i];
         const Value *val = &values[i];
         uint8_t *dest = row_buffer + col->offset;
-        
+
         if (val->is_null) {
-            // For now, just write zeros for NULL values
+            // Record NULL in the bitmap; leave the value bytes zeroed.
+            row_buffer[i / 8] |= (uint8_t)(1u << (i % 8));
             continue;
         }
-        
+
         switch (col->type) {
             case COL_TYPE_INTEGER:
-                *(int64_t*)dest = val->value.integer;
+                // memcpy (not a type-punned store): dest is not 8-byte aligned
+                // once the NULL bitmap shifts columns, and a misaligned scalar
+                // store is UB / SIGBUS on strict-alignment targets.
+                memcpy(dest, &val->value.integer, sizeof(int64_t));
                 break;
-                
+
             case COL_TYPE_REAL:
-                *(double*)dest = val->value.real;
+                memcpy(dest, &val->value.real, sizeof(double));
                 break;
-                
+
             case COL_TYPE_TEXT:
                 // Guard zero-width TEXT: col->length is uint8_t, so col->length-1
                 // would wrap to a huge size_t and defeat the clamp below.
@@ -454,19 +460,29 @@ bool table_unpack_row(Table *table, const uint8_t *row_buffer, Value *values) {
         const ColumnDesc *col = &table->header->columns[i];
         const uint8_t *src = row_buffer + col->offset;
         Value *val = &values[i];
-        
+
+        bool is_null = (row_buffer[i / 8] & (uint8_t)(1u << (i % 8))) != 0;
+        if (is_null) {
+            // Fully initialise the union (text.data = NULL, length = 0). The
+            // caller frees each Value via value_destroy, which free()s
+            // value.text.data; leaving it uninitialised would free garbage.
+            *val = (Value){ .type = col->type, .is_null = true };
+            continue;
+        }
+
         val->type = col->type;
         val->is_null = false;
-        
+
         switch (col->type) {
             case COL_TYPE_INTEGER:
-                val->value.integer = *(int64_t*)src;
+                // memcpy: src may be unaligned (NULL bitmap shifts columns).
+                memcpy(&val->value.integer, src, sizeof(int64_t));
                 break;
-                
+
             case COL_TYPE_REAL:
-                val->value.real = *(double*)src;
+                memcpy(&val->value.real, src, sizeof(double));
                 break;
-                
+
             case COL_TYPE_TEXT:
                 val->value.text.length = strnlen((char*)src, col->length);
                 val->value.text.data = malloc(val->value.text.length + 1);
@@ -477,12 +493,12 @@ bool table_unpack_row(Table *table, const uint8_t *row_buffer, Value *values) {
                     return false;
                 }
                 break;
-                
+
             default:
                 return false;
         }
     }
-    
+
     return true;
 }
 
@@ -561,13 +577,12 @@ bool table_flush_durable(Table *table) {
     return true;
 }
 
-// Table scanning and selection
-bool table_select(Table *table, const char *where_clause, 
+// Table scanning. V2 has no WHERE clause; scan every row and let the caller
+// filter in application code.
+bool table_select(Table *table,
                  void (*callback)(void *ctx, const Value *row), void *ctx) {
     if (!table || !callback) return false;
-    
-    (void)where_clause; // TODO: Implement WHERE clause parsing
-    
+
     Value *row_values = malloc(sizeof(Value) * table->header->column_count);
     if (!row_values) return false;
     

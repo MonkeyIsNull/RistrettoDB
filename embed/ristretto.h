@@ -1,18 +1,19 @@
 /*
-** RistrettoDB - A tiny, blazingly fast, embeddable SQL engine
-** 
+** RistrettoDB - a fast, embeddable, fixed-schema, append-only, single-writer
+** telemetry/analytics store (Table V2 engine).
+**
 ** This file contains the complete public API for RistrettoDB.
-** Simply include this header and link against libristretto.a or libristretto.so
-** 
-** RistrettoDB provides two complementary APIs:
-** 1. Original SQL API - General-purpose SQL with 2.8x SQLite performance
-** 2. Table V2 API - Ultra-fast append-only tables with 4.57x SQLite performance
+** Simply include this header and link against libristretto.a or libristretto.so.
+**
+** RistrettoDB is NOT a general-purpose SQL database: there is no JOIN, UPDATE,
+** DELETE, or transactions, and exactly one writer at a time. It stores
+** fixed-schema rows in an mmap-backed append-only file and scans them fast.
 **
 ** Licensed under the MIT License.
-** 
+**
 ** To use RistrettoDB in your application:
 **   #include "ristretto.h"
-**   // Use RISTRETTO_SQL_API or RISTRETTO_V2_API functions
+**   // Use the ristretto_table_* / ristretto_value_* Table V2 functions.
 */
 
 #ifndef RISTRETTO_H
@@ -30,10 +31,10 @@ extern "C" {
 /*
 ** RistrettoDB Version Information
 */
-#define RISTRETTO_VERSION        "2.0.0"
-#define RISTRETTO_VERSION_NUMBER 2000000
-#define RISTRETTO_VERSION_MAJOR  2
-#define RISTRETTO_VERSION_MINOR  0
+#define RISTRETTO_VERSION        "0.3.0"
+#define RISTRETTO_VERSION_NUMBER 3000
+#define RISTRETTO_VERSION_MAJOR  0
+#define RISTRETTO_VERSION_MINOR  3
 #define RISTRETTO_VERSION_PATCH  0
 
 /*
@@ -48,57 +49,7 @@ int ristretto_version_number(void);
 
 /*
 ** =============================================================================
-** ORIGINAL SQL API - General-purpose SQL with 2.8x SQLite performance
-** =============================================================================
-*/
-
-/*
-** Database handle - opaque structure
-*/
-typedef struct RistrettoDB RistrettoDB;
-
-/*
-** Result codes
-*/
-typedef enum {
-    RISTRETTO_OK = 0,
-    RISTRETTO_ERROR = -1,
-    RISTRETTO_NOMEM = -2,
-    RISTRETTO_IO_ERROR = -3,
-    RISTRETTO_PARSE_ERROR = -4,
-    RISTRETTO_NOT_FOUND = -5,
-    RISTRETTO_CONSTRAINT_ERROR = -6
-} RistrettoResult;
-
-/*
-** Database lifecycle functions
-*/
-RistrettoDB* ristretto_open(const char* filename);
-void ristretto_close(RistrettoDB* db);
-
-/*
-** Execute SQL statement (DDL/DML)
-*/
-RistrettoResult ristretto_exec(RistrettoDB* db, const char* sql);
-
-/*
-** Query callback function type
-*/
-typedef void (*RistrettoCallback)(void* ctx, int n_cols, char** values, char** col_names);
-
-/*
-** Execute SQL query with callback
-*/
-RistrettoResult ristretto_query(RistrettoDB* db, const char* sql, RistrettoCallback callback, void* ctx);
-
-/*
-** Get error string for result code
-*/
-const char* ristretto_error_string(RistrettoResult result);
-
-/*
-** =============================================================================
-** TABLE V2 API - Ultra-fast append-only tables with 4.57x SQLite performance
+** TABLE V2 API - fast append-only, fixed-schema tables
 ** =============================================================================
 */
 
@@ -117,7 +68,7 @@ const char* ristretto_error_string(RistrettoResult result);
 ** Magic bytes for file format identification
 */
 #define RISTRETTO_TABLE_MAGIC "RSTRDB\x00\x00"
-#define RISTRETTO_TABLE_VERSION 2                   // format v2 (1024-byte header)
+#define RISTRETTO_TABLE_VERSION 3                   // format v3 (1024-byte header + per-row NULL bitmap)
 
 /*
 ** Open modes for ristretto_table_create_ex / ristretto_table_open_ex.
@@ -214,7 +165,9 @@ RistrettoTable* ristretto_table_open_ex(const char *name, const char *base_dir);
 bool ristretto_table_append_row(RistrettoTable *table, const RistrettoValue *values);
 bool ristretto_table_append_row_n(RistrettoTable *table, const RistrettoValue *values,
                                   uint32_t value_count);
-bool ristretto_table_select(RistrettoTable *table, const char *where_clause,
+/* Scans every row, invoking callback once per row. V2 has no WHERE clause:
+** scan and filter in your application. */
+bool ristretto_table_select(RistrettoTable *table,
                            void (*callback)(void *ctx, const RistrettoValue *row), void *ctx);
 
 /*
@@ -264,16 +217,6 @@ bool ristretto_create_data_directory(void);
 */
 
 #ifndef RISTRETTO_NO_COMPATIBILITY_LAYER
-
-/* Original SQL API compatibility */
-#define RistrettoDB                  RistrettoDB
-#define RistrettoResult              RistrettoResult
-#define RistrettoCallback            RistrettoCallback
-#define ristretto_open               ristretto_open
-#define ristretto_close              ristretto_close
-#define ristretto_exec               ristretto_exec
-#define ristretto_query              ristretto_query
-#define ristretto_error_string       ristretto_error_string
 
 /* Table V2 API compatibility */
 #define Table                        RistrettoTable

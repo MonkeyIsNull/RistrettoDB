@@ -1,15 +1,12 @@
 # RistrettoDB Go Bindings
 
-cgo bindings for [RistrettoDB](../../), a tiny, embeddable database written in C.
+cgo bindings for [RistrettoDB](../../), a fast, embeddable, fixed-schema,
+append-only, single-writer telemetry/analytics store written in C.
 
-This directory is a self-contained Go module exposing two APIs:
-
-- **Original SQL API** (`DB` / `Open` / `Exec` / `Query`) — a small SQL engine
-  supporting a limited subset of SQL (`CREATE TABLE`, `INSERT`, `SELECT`). It has
-  no bound parameters, so statements are plain strings.
-- **Table V2 API** (`Table` / `CreateTable` / `OpenTable` / `AppendRow` / `Scan`)
-  — a fixed-width, append-only, mmap-backed table store. This is the fast
-  write/scan path and the most complete part of the bindings.
+This directory is a self-contained Go module exposing the **Table V2 API**
+(`Table` / `CreateTable` / `OpenTable` / `AppendRow` / `Scan`): a fixed-width,
+append-only, mmap-backed table store. RistrettoDB is not a general-purpose SQL
+database — there is no query language, JOINs, UPDATE/DELETE, or transactions.
 
 ## Layout
 
@@ -17,9 +14,9 @@ This directory is a self-contained Go module exposing two APIs:
 examples/go/
 ├── go.mod                 module github.com/MonkeyIsNull/RistrettoDB/examples/go
 ├── ristretto/             the binding package
-│   ├── ristretto.go       public API (DB, Table, Value, ...)
+│   ├── ristretto.go       public API (Table, Value, ...)
 │   ├── cbridge.h/.c       small C glue (cgo compiles cbridge.c automatically)
-│   ├── exports.go         //export callbacks for query/scan
+│   ├── exports.go         //export scan callback
 │   └── ristretto_test.go  tests
 └── cmd/example/main.go    runnable demo
 ```
@@ -86,14 +83,12 @@ one, and its rows survive process restarts.
 
 ## Known limitations
 
-These reflect the current state of the underlying C engine, not the bindings:
+These reflect the design of the underlying C engine, not the bindings:
 
-- **V2 does not persist NULL-ness.** A value written with `NullValue()` reads back
-  as the column's zero value (`0`, `0.0`, or `""`).
-- **V2 ignores `WHERE`.** `table_select` in C has a `TODO` for `WHERE`, so `Scan`
-  / `ForEach` return every row; filter in Go.
-- **SQL API has no bound parameters** and its parser does not accept escaped
-  quotes, so TEXT literals cannot contain a single quote. Use `QuoteString` for
-  the common (quote-free) case.
-- The SQL `Query` result is a `map[string]string` per row (column order is not
-  preserved).
+- **NULLs persist and round-trip as NULL.** A value written with `NullValue()`
+  reads back with `IsNull` set (format v3 stores a per-row NULL bitmap).
+- **No `WHERE` clause.** `Scan` / `ForEach` return every row; filter in Go.
+- **Single-writer.** An advisory `flock` guards the file (a no-op on some network
+  filesystems); open a table from one writer at a time.
+- **No WAL.** `Close` does a durable `msync`+`fsync`, but a crash mid-run may lose
+  rows written since the last sync.

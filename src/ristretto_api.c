@@ -76,13 +76,13 @@ bool ristretto_table_append_row_n(RistrettoTable *table, const RistrettoValue *v
     return table_append_row_n((Table*)table, (const Value*)values, value_count);
 }
 
-bool ristretto_table_select(RistrettoTable *table, const char *where_clause,
+bool ristretto_table_select(RistrettoTable *table,
                             void (*callback)(void *ctx, const RistrettoValue *row),
                             void *ctx) {
     /* RistrettoValue and Value are layout-identical, so the callback pointer
     ** types differ only in the row parameter's (compatible) type. */
     void (*cb)(void *, const Value *) = (void (*)(void *, const Value *))callback;
-    return table_select((Table*)table, where_clause, cb, ctx);
+    return table_select((Table*)table, cb, ctx);
 }
 
 /* ---- File management ----------------------------------------------------- */

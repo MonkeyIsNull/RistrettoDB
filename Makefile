@@ -16,18 +16,15 @@ CFLAGS += -march=native
 endif
 LDFLAGS =
 DEBUGFLAGS = -g -O0 -DDEBUG
-TARGET = ristretto
-TEST_TARGET = test_basic
 TEST_V2_TARGET = test_table_v2
 TEST_COMPREHENSIVE_TARGET = test_comprehensive
-TEST_ORIGINAL_TARGET = test_original_api
 TEST_STRESS_TARGET = test_stress
-TEST_WHERE_TARGET = test_where
+TEST_GOLDEN_TARGET = test_golden_format
 
 # Library targets
 STATIC_LIB = libristretto.a
 DYNAMIC_LIB = libristretto.so
-LIBRARY_VERSION = 2.0.0
+LIBRARY_VERSION = 0.3.0
 
 SRC_DIR = src
 INCLUDE_DIR = include
@@ -36,13 +33,10 @@ BUILD_DIR = build
 BIN_DIR = bin
 LIB_DIR = lib
 
-# Library source files (exclude CLI)
-LIB_SOURCES = $(filter-out $(SRC_DIR)/main.c $(SRC_DIR)/ristretto_cli.c, $(wildcard $(SRC_DIR)/*.c))
+# Library source files. After the V2-only pivot src/ holds exactly the engine
+# (table_v2.c), the public wrappers (ristretto_api.c) and version.c.
+LIB_SOURCES = $(wildcard $(SRC_DIR)/*.c)
 LIB_OBJECTS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(LIB_SOURCES))
-
-# CLI source files
-CLI_SOURCES = $(SRC_DIR)/ristretto_cli.c
-CLI_OBJECTS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(CLI_SOURCES))
 
 # All source files
 SOURCES = $(wildcard $(SRC_DIR)/*.c)
@@ -52,11 +46,12 @@ HEADERS = $(wildcard $(INCLUDE_DIR)/*.h)
 TEST_SOURCES = $(wildcard $(TEST_DIR)/*.c)
 TEST_OBJECTS = $(patsubst $(TEST_DIR)/%.c,$(BUILD_DIR)/test_%.o,$(TEST_SOURCES))
 
-.PHONY: all clean debug test test-basic test-v2 test-comprehensive test-original test-stress test-where test-all run benchmark
+.PHONY: all clean debug test-v2 test-comprehensive test-stress test-golden test-all benchmark
 .PHONY: libraries static dynamic install uninstall example
 
-# Default target builds both CLI and libraries
-all: $(BUILD_DIR) $(BIN_DIR) $(LIB_DIR) $(BIN_DIR)/$(TARGET) libraries
+# Default target builds the libraries (static + dynamic). There is no CLI in
+# the V2-only build.
+all: $(BUILD_DIR) $(BIN_DIR) $(LIB_DIR) libraries
 
 # Library targets  
 libraries: $(LIB_DIR)/$(STATIC_LIB) $(LIB_DIR)/$(DYNAMIC_LIB)
@@ -77,10 +72,6 @@ $(BIN_DIR):
 $(LIB_DIR):
 	mkdir -p $(LIB_DIR)
 
-# Build CLI executable (links against static library)
-$(BIN_DIR)/$(TARGET): $(LIB_DIR)/$(STATIC_LIB) $(CLI_OBJECTS) | $(BIN_DIR)
-	$(CC) $(CFLAGS) -o $@ $(CLI_OBJECTS) $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
-
 # Build static library
 $(LIB_DIR)/$(STATIC_LIB): $(LIB_OBJECTS) | $(LIB_DIR)
 	ar rcs $@ $^
@@ -98,59 +89,40 @@ $(BUILD_DIR)/test_%.o: $(TEST_DIR)/test_%.c $(HEADERS) | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 # Test targets
-test: $(BIN_DIR)/$(TEST_TARGET)
-	$(BIN_DIR)/$(TEST_TARGET)
-
-# Alias: `test-basic` reads clearly alongside test-v2 / test-comprehensive / ...
-test-basic: test
-
 test-v2: $(BIN_DIR)/$(TEST_V2_TARGET)
 	$(BIN_DIR)/$(TEST_V2_TARGET)
 
 test-comprehensive: $(BIN_DIR)/$(TEST_COMPREHENSIVE_TARGET)
 	$(BIN_DIR)/$(TEST_COMPREHENSIVE_TARGET)
 
-test-original: $(BIN_DIR)/$(TEST_ORIGINAL_TARGET)
-	$(BIN_DIR)/$(TEST_ORIGINAL_TARGET)
-
 test-stress: $(BIN_DIR)/$(TEST_STRESS_TARGET)
 	$(BIN_DIR)/$(TEST_STRESS_TARGET)
 
-test-where: $(BIN_DIR)/$(TEST_WHERE_TARGET)
-	$(BIN_DIR)/$(TEST_WHERE_TARGET)
+test-golden: $(BIN_DIR)/$(TEST_GOLDEN_TARGET)
+	$(BIN_DIR)/$(TEST_GOLDEN_TARGET)
 
-test-all: test test-v2 test-comprehensive test-original test-stress test-where
+test-all: test-v2 test-comprehensive test-stress test-golden
 	@echo ""
 	@echo "ALL TEST SUITES COMPLETED!"
-	@echo "Original API tests"
-	@echo "Table V2 basic tests" 
+	@echo "Table V2 basic tests"
 	@echo "Comprehensive functionality tests"
-	@echo "Original SQL API tests"
 	@echo "Stress and performance tests"
+	@echo "Golden on-disk format round-trip test"
 
 # Test executables (link against static library)
-$(BIN_DIR)/$(TEST_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_basic.o | $(BIN_DIR)
-	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_basic.o $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
-
 $(BIN_DIR)/$(TEST_V2_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_table_v2.o | $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_table_v2.o $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
 
 $(BIN_DIR)/$(TEST_COMPREHENSIVE_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_comprehensive.o | $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_comprehensive.o $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
 
-$(BIN_DIR)/$(TEST_ORIGINAL_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_original_api.o | $(BIN_DIR)
-	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_original_api.o $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
-
 $(BIN_DIR)/$(TEST_STRESS_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_stress.o | $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_stress.o $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
 
-$(BIN_DIR)/$(TEST_WHERE_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_where.o | $(BIN_DIR)
-	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_where.o $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
+$(BIN_DIR)/$(TEST_GOLDEN_TARGET): $(LIB_DIR)/$(STATIC_LIB) $(BUILD_DIR)/test_golden_format.o | $(BIN_DIR)
+	$(CC) $(CFLAGS) -o $@ $(BUILD_DIR)/test_golden_format.o $(LIB_DIR)/$(STATIC_LIB) $(LDFLAGS)
 
-run: $(BIN_DIR)/$(TARGET)
-	$(BIN_DIR)/$(TARGET)
-
-# Example program showing how to embed RistrettoDB
+# Example program showing how to embed RistrettoDB (Table V2 API)
 example: $(LIB_DIR)/$(STATIC_LIB)
 	@if [ ! -f example.c ]; then \
 		echo "Creating example.c..."; \
@@ -159,10 +131,11 @@ example: $(LIB_DIR)/$(STATIC_LIB)
 		echo '' >> example.c; \
 		echo 'int main() {' >> example.c; \
 		echo '    printf("RistrettoDB Version: %s\\n", ristretto_version());' >> example.c; \
-		echo '    RistrettoDB* db = ristretto_open("example.db");' >> example.c; \
-		echo '    if (db) {' >> example.c; \
-		echo '        printf("Database opened successfully!\\n");' >> example.c; \
-		echo '        ristretto_close(db);' >> example.c; \
+		echo '    RistrettoTable* t = ristretto_table_create("example",' >> example.c; \
+		echo '        "CREATE TABLE example (id INTEGER, name TEXT(32))");' >> example.c; \
+		echo '    if (t) {' >> example.c; \
+		echo '        printf("Table created successfully!\\n");' >> example.c; \
+		echo '        ristretto_table_close(t);' >> example.c; \
 		echo '    }' >> example.c; \
 		echo '    return 0;' >> example.c; \
 		echo '}' >> example.c; \
@@ -177,15 +150,13 @@ LIBDIR = $(PREFIX)/lib
 INCLUDEDIR = $(PREFIX)/include
 
 install: all
-	mkdir -p $(BINDIR) $(LIBDIR) $(INCLUDEDIR)
-	cp $(BIN_DIR)/$(TARGET) $(BINDIR)/
+	mkdir -p $(LIBDIR) $(INCLUDEDIR)
 	cp $(LIB_DIR)/$(STATIC_LIB) $(LIBDIR)/
 	cp $(LIB_DIR)/$(DYNAMIC_LIB) $(LIBDIR)/
 	cp embed/ristretto.h $(INCLUDEDIR)/
 	ldconfig || true
 
 uninstall:
-	rm -f $(BINDIR)/$(TARGET)
 	rm -f $(LIBDIR)/$(STATIC_LIB)
 	rm -f $(LIBDIR)/$(DYNAMIC_LIB)*
 	rm -f $(INCLUDEDIR)/ristretto.h
@@ -197,23 +168,15 @@ clean:
 format:
 	clang-format -i $(SRC_DIR)/*.c $(INCLUDE_DIR)/*.h $(TEST_DIR)/*.c
 
-# Benchmark targets
+# Benchmark targets. The V2-only tree ships a single write-throughput
+# benchmark (benchmark/ultra_fast_benchmark.c). See benchmark/README.md for the
+# pinned, reproducible configuration.
 benchmark:
-	@echo "Building and running benchmarks..."
-	$(MAKE) -C benchmark benchmarks
-	$(MAKE) -C benchmark run-all
+	@echo "Building and running the V2 write-throughput benchmark..."
+	$(MAKE) -C benchmark run-ultra-fast
 
 benchmark-build:
 	$(MAKE) -C benchmark benchmarks
-
-benchmark-vs-sqlite:
-	$(MAKE) -C benchmark run-benchmark
-
-benchmark-micro:
-	$(MAKE) -C benchmark run-microbench
-
-benchmark-speedtest:
-	$(MAKE) -C benchmark run-speedtest
 
 benchmark-ultra-fast:
 	$(MAKE) -C benchmark run-ultra-fast
@@ -227,7 +190,7 @@ help:
 	@echo "========================"
 	@echo ""
 	@echo "Main targets:"
-	@echo "  make              - Build CLI and libraries"
+	@echo "  make              - Build static + dynamic libraries"
 	@echo "  make libraries    - Build both static and dynamic libraries"
 	@echo "  make static       - Build static library (libristretto.a)"
 	@echo "  make dynamic      - Build dynamic library (libristretto.so)"
@@ -237,11 +200,10 @@ help:
 	@echo "  make format       - Format source code"
 	@echo ""
 	@echo "Testing targets:"
-	@echo "  make test         - Build and run basic tests"
-	@echo "  make test-v2      - Build and run table v2 tests"
+	@echo "  make test-v2      - Build and run Table V2 tests"
 	@echo "  make test-comprehensive - Run comprehensive functionality tests"
-	@echo "  make test-original - Run original SQL API tests"
 	@echo "  make test-stress   - Run stress and performance tests"
+	@echo "  make test-golden   - Run golden on-disk format round-trip test"
 	@echo "  make test-all      - Run ALL test suites"
 	@echo ""
 	@echo "Installation:"
@@ -249,16 +211,12 @@ help:
 	@echo "  make uninstall    - Remove installation"
 	@echo ""
 	@echo "Benchmark targets:"
-	@echo "  make benchmark         - Build and run all benchmarks"
+	@echo "  make benchmark         - Build and run the V2 write-throughput benchmark"
 	@echo "  make benchmark-build   - Build benchmark executables"
-	@echo "  make benchmark-vs-sqlite - Run SQLite comparison"
-	@echo "  make benchmark-micro   - Run microbenchmarks"
-	@echo "  make benchmark-speedtest - Run speedtest subset"
 	@echo "  make benchmark-ultra-fast - Run ultra-fast write benchmark"
 	@echo "  make benchmark-clean   - Clean benchmark artifacts"
 	@echo ""
 	@echo "Files created:"
-	@echo "  bin/ristretto     - CLI executable"
 	@echo "  lib/libristretto.a - Static library"
 	@echo "  lib/libristretto.so - Dynamic library"
 	@echo "  ristretto.h       - Public header for embedding"

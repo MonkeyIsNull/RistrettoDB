@@ -1,9 +1,10 @@
 /**
  * RistrettoDB Node.js Bindings (koffi)
  *
- * A tiny, embeddable SQL engine. Exposes the Original SQL API
- * (RistrettoDB: open/exec/query/close) and the append-only Table V2 API
- * (RistrettoTable: create/open/appendRow/getRowCount/close).
+ * RistrettoDB is a fast, embeddable, fixed-schema, append-only, single-writer
+ * telemetry/analytics store. It is NOT a general-purpose SQL database (no JOIN,
+ * UPDATE, DELETE, or transactions). This module exposes the Table V2 API
+ * (RistrettoTable: create/open/appendRow/getRowCount/select/close).
  *
  * Requires Node >= 18 and the `koffi` FFI package (prebuilt, no native build).
  * Build the shared library first:  make dynamic   (from the repo root).
@@ -65,9 +66,6 @@ if (koffi.sizeof(CValue) !== 32) {
   throw new Error(`RistrettoValue ABI mismatch: expected 32 bytes, got ${koffi.sizeof(CValue)}`);
 }
 
-const QueryCallback = koffi.proto(
-  'void RistrettoQueryCallback(void *ctx, int nCols, char **values, char **colNames)');
-
 // Table V2 scan callback: fired once per row with a pointer to an array of
 // column_count RistrettoValue structs (valid only for the duration of the call).
 const SelectCallback = koffi.proto(
@@ -78,18 +76,12 @@ const c = {
   version: lib.func('const char *ristretto_version(void)'),
   versionNumber: lib.func('int ristretto_version_number(void)'),
 
-  open: lib.func('void *ristretto_open(const char *filename)'),
-  close: lib.func('void ristretto_close(void *db)'),
-  exec: lib.func('int ristretto_exec(void *db, const char *sql)'),
-  query: lib.func('int ristretto_query(void *db, const char *sql, RistrettoQueryCallback *cb, void *ctx)'),
-  errorString: lib.func('const char *ristretto_error_string(int result)'),
-
   tableCreate: lib.func('void *ristretto_table_create(const char *name, const char *schema)'),
   tableOpen: lib.func('void *ristretto_table_open(const char *name)'),
   tableClose: lib.func('void ristretto_table_close(void *table)'),
   tableRowCount: lib.func('size_t ristretto_table_get_row_count(void *table)'),
   tableAppendRowN: lib.func('bool ristretto_table_append_row_n(void *table, RistrettoValueC *values, uint32_t n)'),
-  tableSelect: lib.func('bool ristretto_table_select(void *table, const char *whereClause, RistrettoSelectCallback *cb, void *ctx)'),
+  tableSelect: lib.func('bool ristretto_table_select(void *table, RistrettoSelectCallback *cb, void *ctx)'),
 };
 
 // ---- Enums / errors --------------------------------------------------------
@@ -149,49 +141,6 @@ function toCValue(v, keepAlive) {
   }
 }
 
-// ---- Original SQL API ------------------------------------------------------
-class RistrettoDB {
-  constructor(filename) {
-    this.filename = filename;
-    this._handle = c.open(filename);
-    if (!this._handle) {
-      throw new RistrettoError(RistrettoResult.ERROR, `Failed to open database: ${filename}`);
-    }
-  }
-  close() {
-    if (this._handle) { c.close(this._handle); this._handle = null; }
-  }
-  exec(sql) {
-    if (!this._handle) throw new RistrettoError(RistrettoResult.ERROR, 'Database is closed');
-    const r = c.exec(this._handle, sql);
-    if (r !== RistrettoResult.OK) throw new RistrettoError(r, c.errorString(r));
-  }
-  query(sql, callback) {
-    if (!this._handle) throw new RistrettoError(RistrettoResult.ERROR, 'Database is closed');
-    const results = [];
-    const cb = koffi.register((ctx, nCols, valuesPtr, colNamesPtr) => {
-      // valuesPtr / colNamesPtr are char** (arrays of nCols C-string pointers).
-      // Decode them as arrays of 'char *'; passing a plain length to
-      // koffi.decode(ptr, 'char *', len) would instead read a single len-byte
-      // string, which is what previously made every field come back undefined.
-      const values = nCols > 0 ? koffi.decode(valuesPtr, koffi.array('char *', nCols)) : [];
-      const colNames = nCols > 0 ? koffi.decode(colNamesPtr, koffi.array('char *', nCols)) : [];
-      const row = {};
-      for (let i = 0; i < nCols; i++) row[colNames[i] ?? `col_${i}`] = values[i];
-      if (callback) callback(row); else results.push(row);
-    }, koffi.pointer(QueryCallback));
-    try {
-      const r = c.query(this._handle, sql, cb, null);
-      if (r !== RistrettoResult.OK) throw new RistrettoError(r, c.errorString(r));
-    } finally {
-      koffi.unregister(cb);
-    }
-    return results;
-  }
-  static version() { return c.version(); }
-  static versionNumber() { return c.versionNumber(); }
-}
-
 // ---- Table V2 API ----------------------------------------------------------
 // Count the columns declared in a `CREATE TABLE name (...)` schema by counting
 // the top-level commas between the outermost parentheses. Used so select() can
@@ -222,10 +171,12 @@ class RistrettoTable {
     if (!h) throw new RistrettoError(RistrettoResult.ERROR, `Failed to create table: ${name}`);
     return new RistrettoTable(h, name, countSchemaColumns(schemaSql));
   }
-  static open(name) {
+  // Open an existing table. Pass columnCount so select() knows how many
+  // values to decode per row (a table opened without its schema has none).
+  static open(name, columnCount = 0) {
     const h = c.tableOpen(name);
     if (!h) throw new RistrettoError(RistrettoResult.ERROR, `Failed to open table: ${name}`);
-    return new RistrettoTable(h, name);
+    return new RistrettoTable(h, name, columnCount);
   }
   close() {
     if (this._handle) { c.tableClose(this._handle); this._handle = null; }
@@ -245,11 +196,12 @@ class RistrettoTable {
   }
 
   // Scan rows, invoking callback(valuesArray) once per row. valuesArray holds
-  // one decoded JS value per column (number / string / null). The C V2 scan
-  // currently ignores the WHERE clause and returns every row. columnCount
-  // defaults to the count learned at create(); pass it explicitly for a table
-  // opened without a schema. Returns an array of the per-row value arrays.
-  select(whereClause, callback, columnCount = this.columnCount) {
+  // one decoded JS value per column (number / string / null). V2 has no WHERE
+  // clause, so every row is visited; filter in JS. columnCount defaults to the
+  // count learned at create(); pass it explicitly for a table opened without a
+  // schema. A NULL decodes to null, keyed off the C is_null flag. Returns an
+  // array of the per-row value arrays.
+  select(callback, columnCount = this.columnCount) {
     if (!this._handle) throw new RistrettoError(RistrettoResult.ERROR, 'Table is closed');
     if (!columnCount || columnCount < 1) {
       throw new RistrettoError(RistrettoResult.ERROR,
@@ -278,7 +230,7 @@ class RistrettoTable {
       if (callback) callback(values); else rows.push(values);
     }, koffi.pointer(SelectCallback));
     try {
-      const ok = c.tableSelect(this._handle, whereClause ?? null, cb, null);
+      const ok = c.tableSelect(this._handle, cb, null);
       if (!ok) throw new RistrettoError(RistrettoResult.ERROR, `select failed for table '${this.name}'`);
     } finally {
       koffi.unregister(cb);
@@ -288,7 +240,6 @@ class RistrettoTable {
 }
 
 module.exports = {
-  RistrettoDB,
   RistrettoTable,
   RistrettoValue,
   RistrettoError,

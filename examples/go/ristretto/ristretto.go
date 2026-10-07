@@ -1,16 +1,12 @@
 // Package ristretto provides cgo bindings for RistrettoDB.
 //
-// RistrettoDB is a tiny, embeddable database written in C. It exposes two
-// distinct APIs, both surfaced here:
+// RistrettoDB is a fast, embeddable, fixed-schema, append-only, single-writer
+// telemetry/analytics store written in C (the "Table V2" engine). It is NOT a
+// general-purpose SQL database: there is no JOIN, UPDATE, DELETE, or
+// transactions, and exactly one writer at a time.
 //
-//   - The Original SQL API (DB / Open / Exec / Query): a small SQL engine
-//     (CREATE TABLE / INSERT / SELECT with a limited expression set). The C
-//     API has no parameter binding, so statements are plain SQL strings; use
-//     QuoteString for any user-supplied TEXT literal.
-//
-//   - The Table V2 API (Table / CreateTable / OpenTable / AppendRow / Scan):
-//     a fixed-width, append-only, mmap-backed table store. This is the fast
-//     write/scan path and is the most complete part of these bindings.
+// The surfaced API is Table / CreateTable / OpenTable / AppendRow / Scan: a
+// fixed-width, append-only, mmap-backed table store.
 //
 // # Building
 //
@@ -33,21 +29,20 @@
 // working directory. CreateTable truncates (O_TRUNC) any existing file;
 // OpenTable resumes an existing file and its rows survive across process
 // restarts. Rows are fixed width: INTEGER and REAL are 8 bytes, TEXT(n) is n
-// bytes (values are truncated to n-1 bytes + NUL).
+// bytes (values are truncated to n-1 bytes + NUL). Each row is prefixed by a
+// small NULL bitmap, so NULLs persist and round-trip as NULL.
 //
-// The on-disk format is version 2 (1024-byte header). Version-1 .rdb files
-// written by older builds are not readable and are rejected cleanly on open.
+// The on-disk format is version 3 (1024-byte header). Older .rdb files
+// (format v1/v2) are not readable and are rejected cleanly on open.
 // CreateTable recreates its file each run, so this binding is unaffected.
 //
 // # Known limitations
 //
-//   - V2 does not persist NULL-ness: a NULL written to a column reads back as
-//     the zero value for that column (0, 0.0, or ""). See NullValue.
-//   - The V2 table_select in C ignores the WHERE clause, so Scan returns every
-//     row; filter in Go. (The Original SQL API's WHERE is evaluated in C.)
+//   - V2 has no WHERE clause: Scan returns every row; filter in Go.
 //   - No WAL: Close performs a durable msync+fsync, but a crash mid-run may
 //     lose rows written since the last sync.
-//   - The SQL API builds queries from strings (no bound parameters).
+//   - Single-writer: an advisory flock guards the file (a no-op on some
+//     network filesystems); open a table from one writer at a time.
 package ristretto
 
 /*
@@ -66,7 +61,6 @@ import (
 	"fmt"
 	"runtime"
 	"runtime/cgo"
-	"strings"
 	"sync"
 	"unsafe"
 )
@@ -161,10 +155,9 @@ func RealValue(v float64) Value { return Value{Type: REAL, Data: v} }
 // bytes) on append.
 func TextValue(v string) Value { return Value{Type: TEXT, Data: v} }
 
-// NullValue builds a NULL value.
-//
-// Note: the V2 storage format does not record NULL-ness, so a value written
-// with NullValue reads back as the column's zero value (0, 0.0, or "").
+// NullValue builds a NULL value. NULLs persist in the V2 format (via a
+// per-row NULL bitmap) and round-trip as NULL (the scanned Value has IsNull
+// set).
 func NullValue() Value { return Value{Type: NULL, IsNull: true} }
 
 // Int returns the value as an int64 (0 if it is not an integer).
@@ -198,103 +191,11 @@ func (v Value) String() string {
 	return fmt.Sprintf("%v", v.Data)
 }
 
-// Version returns the RistrettoDB version string, e.g. "2.0.0".
+// Version returns the RistrettoDB version string, e.g. "0.3.0".
 func Version() string { return C.GoString(C.ristretto_version()) }
 
 // VersionNumber returns the packed numeric version.
 func VersionNumber() int { return int(C.ristretto_version_number()) }
-
-// QuoteString wraps a Go string as a single-quoted SQL TEXT literal for the
-// Original SQL API (which has no bound parameters). Embedded single quotes are
-// doubled per the SQL standard, but note that the current C parser does not
-// accept escaped quotes, so strings containing a single quote cannot be used
-// as TEXT literals with this engine.
-func QuoteString(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
-
-// =============================================================================
-// Original SQL API
-// =============================================================================
-
-// DB is a handle to the Original SQL API database.
-type DB struct {
-	handle *C.RistrettoDB
-	mu     sync.Mutex
-	closed bool
-}
-
-// Open opens or creates a RistrettoDB SQL database file.
-func Open(filename string) (*DB, error) {
-	cName := C.CString(filename)
-	defer C.free(unsafe.Pointer(cName))
-
-	h := C.ristretto_open(cName)
-	if h == nil {
-		return nil, &RistrettoError{Code: Error, Message: "failed to open database: " + filename}
-	}
-	db := &DB{handle: h}
-	runtime.SetFinalizer(db, (*DB).Close)
-	return db, nil
-}
-
-// Close releases the database. It is safe to call more than once.
-func (db *DB) Close() error {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	if !db.closed && db.handle != nil {
-		C.ristretto_close(db.handle)
-		db.handle = nil
-		db.closed = true
-		runtime.SetFinalizer(db, nil)
-	}
-	return nil
-}
-
-// Exec runs a DDL/DML statement (CREATE TABLE, INSERT, ...).
-func (db *DB) Exec(sql string) error {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	if db.closed {
-		return &RistrettoError{Code: Error, Message: "database is closed"}
-	}
-	cSQL := C.CString(sql)
-	defer C.free(unsafe.Pointer(cSQL))
-
-	res := Result(C.ristretto_exec(db.handle, cSQL))
-	if res != OK {
-		return &RistrettoError{Code: res, Message: C.GoString(C.ristretto_error_string(C.int(res)))}
-	}
-	return nil
-}
-
-// QueryResult is a single result row keyed by column name.
-type QueryResult map[string]string
-
-type queryCollector struct {
-	rows []QueryResult
-}
-
-// Query runs a SELECT and returns the result rows.
-func (db *DB) Query(sql string) ([]QueryResult, error) {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	if db.closed {
-		return nil, &RistrettoError{Code: Error, Message: "database is closed"}
-	}
-	cSQL := C.CString(sql)
-	defer C.free(unsafe.Pointer(cSQL))
-
-	col := &queryCollector{}
-	h := cgo.NewHandle(col)
-	defer h.Delete()
-
-	res := Result(C.rdb_query(db.handle, cSQL, unsafe.Pointer(&h)))
-	if res != OK {
-		return nil, &RistrettoError{Code: res, Message: C.GoString(C.ristretto_error_string(C.int(res)))}
-	}
-	return col.rows, nil
-}
 
 // =============================================================================
 // Table V2 API
@@ -458,8 +359,8 @@ type scanState struct {
 	err   error
 }
 
-// ForEach scans every row (WHERE is not yet implemented in C, so all rows are
-// visited) and calls fn for each. Return false from fn to stop early.
+// ForEach scans every row (V2 has no WHERE clause, so all rows are visited)
+// and calls fn for each. Return false from fn to stop early.
 func (t *Table) ForEach(fn func(Row) bool) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()

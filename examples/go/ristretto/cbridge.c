@@ -8,18 +8,14 @@
 ** C union itself.
 */
 #include "cbridge.h"
-#include "_cgo_export.h" /* goSelectCallback, goQueryCallback */
+#include "_cgo_export.h" /* goSelectCallback */
 
 /* ---- Trampolines --------------------------------------------------------- */
-int rdb_query(RistrettoDB *db, const char *sql, void *ctx) {
-    return ristretto_query(db, sql, goQueryCallback, ctx);
-}
-
 int rdb_table_select(Table *t, void *ctx) {
     /* goSelectCallback is generated with a non-const row parameter; the C API
     ** takes const. The cast is safe: the callback only reads the row. */
     void (*cb)(void *, const Value *) = (void (*)(void *, const Value *))goSelectCallback;
-    return table_select(t, NULL, cb, ctx) ? 0 : -1;
+    return table_select(t, cb, ctx) ? 0 : -1;
 }
 
 /* ---- Value accessors ----------------------------------------------------- */

@@ -5,7 +5,6 @@
 #include <time.h>
 #include <unistd.h>
 #include "table_v2.h"
-#include "db.h"
 
 // Test framework
 static int tests_run = 0;
@@ -52,7 +51,7 @@ bool test_table_v2_basic_setup(void) {
     
     REQUIRE(table != NULL, "Table creation failed");
     REQUIRE(table->header->column_count == 3, "Wrong column count");
-    REQUIRE(table->header->row_size == 8 + 8 + 32, "Wrong row size calculation");
+    REQUIRE(table->header->row_size == NULL_BITMAP_BYTES + 8 + 8 + 32, "Wrong row size calculation");
     
     printf("\n    Table created with %u columns, %u bytes per row", 
            table->header->column_count, table->header->row_size);
@@ -210,7 +209,7 @@ bool test_query_scanning(void) {
     // Test table scanning with callback (from manual)
     QueryContext ctx = { .total_events = 0, .target_user_id = 2, .matching_events = 0 };
     
-    REQUIRE(table_select(table, NULL, count_events_callback, &ctx), "Table scan failed");
+    REQUIRE(table_select(table, count_events_callback, &ctx), "Table scan failed");
     REQUIRE(ctx.total_events == 50, "Wrong total event count");
     REQUIRE(ctx.matching_events == 10, "Wrong matching event count"); // user_id 2 appears 10 times
     
@@ -237,7 +236,7 @@ bool test_timeseries_schema(void) {
     
     REQUIRE(table != NULL, "Timeseries table creation failed");
     REQUIRE(table->header->column_count == 4, "Wrong column count");
-    REQUIRE(table->header->row_size == 32, "Wrong row size for timeseries"); // 8+8+8+8
+    REQUIRE(table->header->row_size == NULL_BITMAP_BYTES + 32, "Wrong row size for timeseries"); // bitmap + 8+8+8+8
     
     // Insert sensor data
     for (int i = 0; i < 1000; i++) {
@@ -270,7 +269,7 @@ bool test_log_schema(void) {
     
     REQUIRE(table != NULL, "Log table creation failed");
     REQUIRE(table->header->column_count == 4, "Wrong column count");
-    REQUIRE(table->header->row_size == 160, "Wrong row size for logs"); // 8+8+16+128
+    REQUIRE(table->header->row_size == NULL_BITMAP_BYTES + 160, "Wrong row size for logs"); // bitmap + 8+8+16+128
     
     // Test different log levels
     const char* components[] = {"auth", "db", "web", "api"};
