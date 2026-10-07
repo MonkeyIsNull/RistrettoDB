@@ -6,10 +6,15 @@
 **   clang -O3 -Iembed -o test_embedded_compat embed/test_embedded_compat.c
 **   ./test_embedded_compat
 */
-#include <stdio.h>
-
+/* Include the amalgamation FIRST so its feature-test macros (_POSIX_C_SOURCE /
+** _DEFAULT_SOURCE, defined at the very top of ristretto.c) are processed before
+** any system header pulls in glibc's <features.h> and locks the feature set.
+** Including <stdio.h> ahead of it would hide clock_gettime/ftruncate/strnlen on
+** glibc under -std=c11. */
 #define RISTRETTO_EMBEDDED
 #include "ristretto.c"
+
+#include <stdio.h>
 
 static void print_row(void *ctx, const RistrettoValue *row) {
     (void)ctx;

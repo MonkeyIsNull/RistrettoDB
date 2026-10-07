@@ -1,5 +1,11 @@
+#if !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
 #if !defined(_DEFAULT_SOURCE)
 #define _DEFAULT_SOURCE 1
+#endif
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE 1
 #endif
 /*
 ** RistrettoDB Embedded
@@ -26,7 +32,15 @@
 
 #ifndef RISTRETTO_EMBEDDED
 
-/* When used as a separate compilation unit, include the public header */
+/* When used as a separate compilation unit, include the public header. The
+** compatibility layer (#define Table RistrettoTable, #define Value
+** RistrettoValue, ...) must be suppressed for THIS translation unit: it would
+** rewrite the inlined internal engine's own `typedef struct {...} Table;` /
+** `Value` into the opaque public names and collide. Suppressing it here is
+** local to ristretto.c and does not affect consumer files that include
+** ristretto.h (they still get the compatibility names). Mirrors the guard in
+** src/ristretto_api.c. */
+#define RISTRETTO_NO_COMPATIBILITY_LAYER
 #include "ristretto.h"
 
 #else
@@ -220,6 +234,25 @@ int ristretto_version_number(void) {
 /* END src/version.c */
 
 /* BEGIN src/table_v2.c */
+/* Feature-test macros: must precede every #include. Under a strict -std=c11 on
+** glibc (Linux), the POSIX/BSD functions this engine uses are hidden otherwise:
+** clock_gettime/CLOCK_MONOTONIC and ftruncate need _POSIX_C_SOURCE, strnlen
+** needs POSIX.1-2008 (_POSIX_C_SOURCE >= 200809L), and _DEFAULT_SOURCE keeps the
+** BSD extras (flock/LOCK_*, mmap/msync helpers) visible on glibc. On macOS,
+** _POSIX_C_SOURCE alone switches libc to strict POSIX and HIDES flock/LOCK_*,
+** so _DARWIN_C_SOURCE is defined there to restore them. Defining these here
+** makes a bare `cc -std=c11 -c src/table_v2.c` self-contained, independent of
+** any -D flag the Makefile or an embedder passes. */
+#if !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+#if !defined(_DEFAULT_SOURCE)
+#define _DEFAULT_SOURCE 1
+#endif
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE 1
+#endif
+
 /* BEGIN table_v2.h */
 #ifndef RISTRETTO_TABLE_V2_H
 #define RISTRETTO_TABLE_V2_H
@@ -1061,13 +1094,30 @@ bool ristretto_table_append_row_n(RistrettoTable *table, const RistrettoValue *v
     return table_append_row_n((Table*)table, (const Value*)values, value_count);
 }
 
+/* The internal engine invokes the scan callback through a pointer of type
+** void(*)(void *, const Value *). Casting the public
+** void(*)(void *, const RistrettoValue *) to that type and calling through it
+** is undefined behavior that UBSan's -fsanitize=function rightly flags
+** ("call through pointer to incorrect function type"), even though the two row
+** types are layout-identical. Forward through a trampoline whose signature
+** EXACTLY matches the internal callback type instead; converting the (compatible)
+** row object pointer inside it is well-defined. */
+typedef struct {
+    void (*user_cb)(void *ctx, const RistrettoValue *row);
+    void *user_ctx;
+} RistrettoSelectForward;
+
+static void ristretto_select_trampoline(void *ctx, const Value *row) {
+    const RistrettoSelectForward *fwd = (const RistrettoSelectForward *)ctx;
+    fwd->user_cb(fwd->user_ctx, (const RistrettoValue *)row);
+}
+
 bool ristretto_table_select(RistrettoTable *table,
                             void (*callback)(void *ctx, const RistrettoValue *row),
                             void *ctx) {
-    /* RistrettoValue and Value are layout-identical, so the callback pointer
-    ** types differ only in the row parameter's (compatible) type. */
-    void (*cb)(void *, const Value *) = (void (*)(void *, const Value *))callback;
-    return table_select((Table*)table, cb, ctx);
+    if (!callback) return false;
+    RistrettoSelectForward fwd = { callback, ctx };
+    return table_select((Table*)table, ristretto_select_trampoline, &fwd);
 }
 
 /* ---- File management ----------------------------------------------------- */

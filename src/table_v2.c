@@ -1,3 +1,22 @@
+/* Feature-test macros: must precede every #include. Under a strict -std=c11 on
+** glibc (Linux), the POSIX/BSD functions this engine uses are hidden otherwise:
+** clock_gettime/CLOCK_MONOTONIC and ftruncate need _POSIX_C_SOURCE, strnlen
+** needs POSIX.1-2008 (_POSIX_C_SOURCE >= 200809L), and _DEFAULT_SOURCE keeps the
+** BSD extras (flock/LOCK_*, mmap/msync helpers) visible on glibc. On macOS,
+** _POSIX_C_SOURCE alone switches libc to strict POSIX and HIDES flock/LOCK_*,
+** so _DARWIN_C_SOURCE is defined there to restore them. Defining these here
+** makes a bare `cc -std=c11 -c src/table_v2.c` self-contained, independent of
+** any -D flag the Makefile or an embedder passes. */
+#if !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+#if !defined(_DEFAULT_SOURCE)
+#define _DEFAULT_SOURCE 1
+#endif
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE 1
+#endif
+
 #include "table_v2.h"
 #include <stdio.h>
 #include <stdlib.h>

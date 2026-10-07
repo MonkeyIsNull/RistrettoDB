@@ -76,13 +76,30 @@ bool ristretto_table_append_row_n(RistrettoTable *table, const RistrettoValue *v
     return table_append_row_n((Table*)table, (const Value*)values, value_count);
 }
 
+/* The internal engine invokes the scan callback through a pointer of type
+** void(*)(void *, const Value *). Casting the public
+** void(*)(void *, const RistrettoValue *) to that type and calling through it
+** is undefined behavior that UBSan's -fsanitize=function rightly flags
+** ("call through pointer to incorrect function type"), even though the two row
+** types are layout-identical. Forward through a trampoline whose signature
+** EXACTLY matches the internal callback type instead; converting the (compatible)
+** row object pointer inside it is well-defined. */
+typedef struct {
+    void (*user_cb)(void *ctx, const RistrettoValue *row);
+    void *user_ctx;
+} RistrettoSelectForward;
+
+static void ristretto_select_trampoline(void *ctx, const Value *row) {
+    const RistrettoSelectForward *fwd = (const RistrettoSelectForward *)ctx;
+    fwd->user_cb(fwd->user_ctx, (const RistrettoValue *)row);
+}
+
 bool ristretto_table_select(RistrettoTable *table,
                             void (*callback)(void *ctx, const RistrettoValue *row),
                             void *ctx) {
-    /* RistrettoValue and Value are layout-identical, so the callback pointer
-    ** types differ only in the row parameter's (compatible) type. */
-    void (*cb)(void *, const Value *) = (void (*)(void *, const Value *))callback;
-    return table_select((Table*)table, cb, ctx);
+    if (!callback) return false;
+    RistrettoSelectForward fwd = { callback, ctx };
+    return table_select((Table*)table, ristretto_select_trampoline, &fwd);
 }
 
 /* ---- File management ----------------------------------------------------- */

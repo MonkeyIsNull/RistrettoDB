@@ -119,14 +119,25 @@ def create_embedded():
     # Start building the embedded
     embedded = []
 
-    # Feature-test macro: must precede every #include. Under a strict
-    # -std=c11 on glibc (Linux), POSIX/BSD functions used by the storage
-    # engine (ftruncate, fsync, flock, mmap/msync) are hidden unless a
-    # feature-test macro is defined. _DEFAULT_SOURCE exposes them and is a
-    # harmless no-op on macOS/BSD. This keeps `clang -std=c11 ristretto.c`
+    # Feature-test macros: must precede every #include. Under a strict
+    # -std=c11 on glibc (Linux), the POSIX/BSD functions used by the storage
+    # engine are hidden unless a feature-test macro is defined:
+    # clock_gettime/CLOCK_MONOTONIC and ftruncate need _POSIX_C_SOURCE, and
+    # strnlen needs POSIX.1-2008 (_POSIX_C_SOURCE >= 200809L). _POSIX_C_SOURCE
+    # exposes those portably (glibc and musl); _DEFAULT_SOURCE additionally
+    # keeps the BSD extras (flock/LOCK_*, mmap/msync helpers) visible on glibc.
+    # On macOS, defining _POSIX_C_SOURCE alone switches libc to strict POSIX and
+    # HIDES the BSD extras (flock, LOCK_EX/LOCK_NB), so _DARWIN_C_SOURCE is
+    # defined there to restore them. This keeps `cc -std=c11 ristretto.c`
     # compiling standalone for embedders regardless of their own flags.
-    embedded.append("""#if !defined(_DEFAULT_SOURCE)
+    embedded.append("""#if !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L
+#endif
+#if !defined(_DEFAULT_SOURCE)
 #define _DEFAULT_SOURCE 1
+#endif
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE 1
 #endif
 """)
 
@@ -156,7 +167,15 @@ def create_embedded():
 
 #ifndef RISTRETTO_EMBEDDED
 
-/* When used as a separate compilation unit, include the public header */
+/* When used as a separate compilation unit, include the public header. The
+** compatibility layer (#define Table RistrettoTable, #define Value
+** RistrettoValue, ...) must be suppressed for THIS translation unit: it would
+** rewrite the inlined internal engine's own `typedef struct {...} Table;` /
+** `Value` into the opaque public names and collide. Suppressing it here is
+** local to ristretto.c and does not affect consumer files that include
+** ristretto.h (they still get the compatibility names). Mirrors the guard in
+** src/ristretto_api.c. */
+#define RISTRETTO_NO_COMPATIBILITY_LAYER
 #include "ristretto.h"
 
 #else
