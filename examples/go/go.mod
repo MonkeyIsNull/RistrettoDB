@@ -1,6 +1,3 @@
-module ristrettodb-go-bindings
+module github.com/MonkeyIsNull/RistrettoDB/examples/go
 
-go 1.19
-
-require (
-)
+go 1.21
