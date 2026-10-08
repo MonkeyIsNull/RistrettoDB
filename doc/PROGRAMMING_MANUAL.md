@@ -7,8 +7,10 @@ bindings.
 
 RistrettoDB is **not** a general-purpose SQL database. There is no query
 language at runtime — no `SELECT`, `JOIN`, `UPDATE`/`DELETE`, `WHERE`, or
-transactions. A `CREATE TABLE` string is used only to declare a fixed schema.
-You append rows and scan them, filtering in your own code.
+transactions. The `CREATE TABLE` string you pass to `ristretto_table_create` is
+**schema-declaration DDL only**: it is parsed solely to define the fixed-width
+columns (names, types, widths), not executed as a SQL query — there is no SQL
+engine behind it. You append rows and scan them, filtering in your own code.
 
 ## Table of Contents
 
@@ -298,8 +300,10 @@ static void on_row(void *ctx, const RistrettoValue *row) {
 
 ## Schema Design
 
-- Declare columns with a `CREATE TABLE name (col TYPE, ...)` string. Supported
-  types: `INTEGER`, `REAL`, `TEXT(n)` (n ≤ 255; default 64 if unspecified).
+- Declare columns with a `CREATE TABLE name (col TYPE, ...)` string. This string
+  is schema-declaration DDL only — parsed solely to define the columns, never
+  executed as a SQL query. Supported types: `INTEGER`, `REAL`, `TEXT(n)`
+  (n ≤ 255; default 64 if unspecified).
 - Up to 14 columns per table (`RISTRETTO_MAX_COLUMNS`).
 - Choose TEXT widths deliberately: rows are fixed width, so a wide TEXT column
   costs that many bytes in every row.

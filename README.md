@@ -36,8 +36,10 @@ into your application.
 
 - **Not a general-purpose SQL database.** There is no query language at runtime:
   no `SELECT`, no `JOIN`, no `UPDATE`/`DELETE`, no transactions, no `WHERE`
-  clause. You scan rows and filter in your own code. (The `CREATE TABLE` string
-  is only used to declare the schema.)
+  clause. You scan rows and filter in your own code. The `CREATE TABLE` string
+  you pass to `ristretto_table_create` is **schema-declaration DDL only** — it is
+  parsed solely to define the fixed-width columns (names, types, widths). It is
+  **not** SQL query support and there is no SQL engine behind it.
 - **Not multi-writer.** Exactly one writer at a time (advisory `flock`).
 - **Not crash-durable (no WAL).** Writes flush with `msync`/`fsync`; rows since
   the last durable flush can be lost on a crash.
@@ -74,6 +76,8 @@ static void print_row(void *ctx, const RistrettoValue *row) {
 int main(void) {
     printf("RistrettoDB Version: %s\n", ristretto_version());
 
+    /* The CREATE TABLE string is schema-declaration DDL only (it defines the
+       columns); it is not a SQL query and there is no query engine. */
     RistrettoTable *t = ristretto_table_create("hello",
         "CREATE TABLE hello (id INTEGER, name TEXT(32))");
 
