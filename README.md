@@ -1,5 +1,17 @@
 # RistrettoDB
 
+[![CI](https://github.com/MonkeyIsNull/RistrettoDB/actions/workflows/ci.yml/badge.svg)](https://github.com/MonkeyIsNull/RistrettoDB/actions/workflows/ci.yml)
+![tests](https://img.shields.io/badge/tests-32%20passing-brightgreen)
+![language](https://img.shields.io/badge/language-C%20(C11)-blue)
+![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
+![status](https://img.shields.io/badge/status-active-brightgreen)
+[![last commit](https://img.shields.io/github/last-commit/MonkeyIsNull/RistrettoDB)](https://github.com/MonkeyIsNull/RistrettoDB/commits/main)
+[![contributions welcome](https://img.shields.io/badge/contributions-welcome-orange)](https://github.com/MonkeyIsNull/RistrettoDB/issues)
+![dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
+![embeddable](https://img.shields.io/badge/embeddable-single--file%20amalgamation-blueviolet)
+![version](https://img.shields.io/badge/version-0.3.0-blue)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 <img src="ristretto_logo.png" alt="RistrettoDB" width="70%" />
 
 > "Bygget på koffein og høy hastighet!"
@@ -363,6 +375,10 @@ RistrettoDB/
 For the full API reference and worked examples, see the
 [Programming Manual](doc/PROGRAMMING_MANUAL.md). Run `make test-comprehensive`
 and `make test-golden` to validate the manual's claims on your system.
+
+## Contributing
+
+Issues and pull requests are welcome. Found a bug or have an idea? Open an issue. Want to send a change? Fork, make it, and open a PR — please build and run the test suites first (`make && make test-v2 test-comprehensive test-stress`). CI builds and runs the C suites, the amalgamation, and the Go/Python/Node bindings on macOS and Linux, plus ASan/UBSan and a fuzz smoke on Linux.
 
 ## License
 
