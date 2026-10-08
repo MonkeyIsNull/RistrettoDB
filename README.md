@@ -12,7 +12,7 @@
 ![embeddable](https://img.shields.io/badge/embeddable-single--file%20amalgamation-blueviolet)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-<img src="ristretto_logoV2.jpg" alt="RistrettoDB" width="50%" />
+<img src="ristretto_logoV2.jpg" alt="RistrettoDB" width="70%" />
 
 > "Bygget på koffein og høy hastighet!"
 
@@ -223,7 +223,7 @@ cd examples/go && go test ./ristretto && go run ./cmd/example  # Go tests + demo
 
 ## How it works
 
-<img src="ristretto_db.jpg" alt="ristrettoDB Logo" width="70%" />
+<img src="ristretto_db.jpg" alt="ristrettoDB Logo" width="60%" />
 
 
 RistrettoDB stores each table as a single `.rdb` file: a fixed-size header
@@ -295,7 +295,7 @@ microarchitectures). Opt into host tuning with `make SIMD=native`.
 
 ## Benchmark
 
-<img src="speedTrain.jpg" alt="speed_train Logo" width="70%" />
+<img src="speedTrain.jpg" alt="speed_train Logo" width="60%" />
 
 
 RistrettoDB ships one reproducible benchmark that measures Table V2 write
